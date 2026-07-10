@@ -1,0 +1,343 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Root Variables ────────────────────────────────── */
+:root {
+  --ember:  #FF4500;
+  --amber:  #FF8C00;
+  --gold:   #FFD700;
+  --bg:     #0a0a0a;
+  --surface:#141414;
+  --card:   #1c1c1c;
+  --border: rgba(255,255,255,0.08);
+  --glass:  rgba(255,255,255,0.04);
+}
+
+html.light {
+  --bg:     #fafafa;
+  --surface:#ffffff;
+  --card:   #f5f5f5;
+  --border: rgba(0,0,0,0.08);
+  --glass:  rgba(0,0,0,0.03);
+}
+
+html.light body {
+  background-color: var(--bg);
+  color: #111111;
+}
+
+html.light .glass,
+html.light .glass-dark {
+  background: rgba(255,255,255,0.85);
+  border-color: rgba(0,0,0,0.08);
+}
+
+html.light .input-flame,
+html.light .admin-input {
+  background: rgba(0,0,0,0.03);
+  border-color: rgba(0,0,0,0.12);
+  color: #111;
+}
+
+html.light .input-flame::placeholder,
+html.light .admin-input::placeholder {
+  color: rgba(0,0,0,0.4);
+}
+
+/* ─── Base ──────────────────────────────────────────── */
+html {
+  scroll-behavior: smooth;
+  overflow-x: hidden;
+}
+
+body {
+  background-color: var(--bg);
+  color: #ffffff;
+  font-family: var(--font-poppins), 'Poppins', sans-serif;
+  overflow-x: hidden;
+}
+
+/* ─── Accessibility ─────────────────────────────────── */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 1rem;
+  z-index: 10000;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  background: #FF4500;
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  top: 1rem;
+}
+
+:focus-visible {
+  outline: 2px solid #FF8C00;
+  outline-offset: 2px;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* ─── Custom Scrollbar ──────────────────────────────── */
+::-webkit-scrollbar        { width: 5px; }
+::-webkit-scrollbar-track  { background: #0f0f0f; }
+::-webkit-scrollbar-thumb  { background: linear-gradient(180deg, #FF4500, #FF8C00); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #FF4500; }
+
+/* ─── Selection ─────────────────────────────────────── */
+::selection { background: rgba(255,69,0,0.35); color: #fff; }
+
+/* ─── Flame Gradient Text ───────────────────────────── */
+.flame-text {
+  background: linear-gradient(135deg, #FF4500 0%, #FF8C00 50%, #FFD700 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.flame-text-r {
+  background: linear-gradient(135deg, #FFD700 0%, #FF8C00 50%, #FF4500 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ─── Glass Card ────────────────────────────────────── */
+.glass {
+  background: rgba(255,255,255,0.04);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.glass-dark {
+  background: rgba(10,10,10,0.7);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+.glass-ember {
+  background: rgba(255,69,0,0.08);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255,69,0,0.2);
+}
+
+/* ─── Flame Button ──────────────────────────────────── */
+.btn-flame {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #FF4500, #FF8C00);
+  color: #fff;
+  font-weight: 700;
+  border-radius: 50px;
+  transition: transform 0.2s, box-shadow 0.3s;
+  box-shadow: 0 4px 20px rgba(255,69,0,0.35);
+}
+.btn-flame::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, #FF8C00, #FFD700);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.btn-flame:hover { transform: translateY(-2px); box-shadow: 0 8px 35px rgba(255,69,0,0.55); }
+.btn-flame:hover::before { opacity: 1; }
+.btn-flame:active { transform: translateY(0); }
+.btn-flame > * { position: relative; z-index: 1; }
+
+/* ─── Outlined Button ───────────────────────────────── */
+.btn-outline {
+  position: relative;
+  overflow: hidden;
+  background: transparent;
+  color: #fff;
+  font-weight: 600;
+  border-radius: 50px;
+  border: 1.5px solid rgba(255,69,0,0.5);
+  transition: border-color 0.3s, transform 0.2s, box-shadow 0.3s;
+}
+.btn-outline:hover {
+  border-color: #FF4500;
+  box-shadow: 0 0 25px rgba(255,69,0,0.25);
+  transform: translateY(-2px);
+}
+
+/* ─── Glow Effects ──────────────────────────────────── */
+.glow-ember  { box-shadow: 0 0 30px rgba(255,69,0,0.4); }
+.glow-gold   { box-shadow: 0 0 30px rgba(255,215,0,0.3); }
+.text-glow   { text-shadow: 0 0 30px rgba(255,69,0,0.6); }
+
+/* ─── Section Utility ───────────────────────────────── */
+.section-pad { padding: 6rem 1.5rem; }
+@media (min-width: 768px)  { .section-pad { padding: 7rem 3rem; } }
+@media (min-width: 1280px) { .section-pad { padding: 8rem 4rem; } }
+
+/* ─── Divider ───────────────────────────────────────── */
+.flame-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #FF4500, #FF8C00, transparent);
+  opacity: 0.3;
+}
+
+/* ─── Food Card Gradients ───────────────────────────── */
+.grad-burger   { background: linear-gradient(135deg, #1a0800 0%, #2d1000 100%); }
+.grad-pizza    { background: linear-gradient(135deg, #1a0000 0%, #2d0800 100%); }
+.grad-sandwich { background: linear-gradient(135deg, #1a1000 0%, #2d1800 100%); }
+.grad-fries    { background: linear-gradient(135deg, #1a1200 0%, #2d1e00 100%); }
+.grad-drinks   { background: linear-gradient(135deg, #00081a 0%, #00122d 100%); }
+.grad-desserts { background: linear-gradient(135deg, #1a0018 0%, #2d002d 100%); }
+
+/* ─── Star Rating ───────────────────────────────────── */
+.star-filled  { color: #FFD700; }
+.star-empty   { color: #333333; }
+
+/* ─── Shimmer Skeleton ──────────────────────────────── */
+.skeleton {
+  background: linear-gradient(90deg, #1c1c1c 25%, #2a2a2a 50%, #1c1c1c 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s infinite;
+}
+
+/* ─── Counter Section ───────────────────────────────── */
+.counter-box {
+  background: linear-gradient(135deg, rgba(255,69,0,0.08), rgba(255,140,0,0.04));
+  border: 1px solid rgba(255,69,0,0.15);
+  border-radius: 20px;
+  padding: 2rem;
+}
+
+/* ─── Input Focus ───────────────────────────────────── */
+.input-flame {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #fff;
+  border-radius: 12px;
+  padding: 0.9rem 1.2rem;
+  width: 100%;
+  transition: border-color 0.3s, box-shadow 0.3s;
+  outline: none;
+  font-family: var(--font-poppins), 'Poppins', sans-serif;
+}
+.input-flame::placeholder { color: rgba(255,255,255,0.3); }
+.input-flame:focus {
+  border-color: rgba(255,69,0,0.6);
+  box-shadow: 0 0 0 3px rgba(255,69,0,0.08);
+}
+
+.admin-input {
+  width: 100%;
+  border-radius: 0.85rem;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.04);
+  color: #fff;
+  padding: 0.85rem 1rem;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.admin-input::placeholder {
+  color: rgba(255,255,255,0.32);
+}
+
+.admin-input:focus {
+  border-color: rgba(255,140,0,0.55);
+  box-shadow: 0 0 0 3px rgba(255,140,0,0.08);
+  background: rgba(255,255,255,0.06);
+}
+
+.admin-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 0.85rem;
+  border: 1px solid rgba(255,140,0,0.18);
+  background: linear-gradient(135deg, rgba(255,69,0,0.16), rgba(255,140,0,0.08));
+  color: #fff;
+  padding: 0.8rem 1rem;
+  font-weight: 700;
+  transition: transform 0.2s, border-color 0.2s, background 0.2s;
+}
+
+.admin-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255,140,0,0.35);
+  background: linear-gradient(135deg, rgba(255,69,0,0.24), rgba(255,140,0,0.12));
+}
+
+.admin-button-danger {
+  border-color: rgba(220,38,38,0.22);
+  background: linear-gradient(135deg, rgba(220,38,38,0.18), rgba(127,29,29,0.12));
+}
+
+.admin-button-danger:hover {
+  border-color: rgba(220,38,38,0.4);
+  background: linear-gradient(135deg, rgba(220,38,38,0.26), rgba(127,29,29,0.16));
+}
+
+/* ─── Gallery Lightbox ──────────────────────────────── */
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.92);
+  backdrop-filter: blur(20px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ─── Coupon Card ───────────────────────────────────── */
+.coupon-dashes {
+  border-top: 2px dashed rgba(255,255,255,0.15);
+}
+
+/* ─── Tag Badge ─────────────────────────────────────── */
+.tag-popular   { background: linear-gradient(135deg,#FF4500,#FF8C00); color:#fff; }
+.tag-new       { background: linear-gradient(135deg,#6B21A8,#A855F7); color:#fff; }
+.tag-spicy     { background: linear-gradient(135deg,#DC2626,#FF4500); color:#fff; }
+.tag-veg       { background: linear-gradient(135deg,#15803D,#22C55E); color:#fff; }
+
+/* ─── Masonry Gallery ───────────────────────────────── */
+.masonry {
+  columns: 2;
+  column-gap: 1rem;
+}
+@media (min-width: 640px) { .masonry { columns: 3; } }
+@media (min-width: 1024px){ .masonry { columns: 4; } }
+
+.masonry-item {
+  break-inside: avoid;
+  margin-bottom: 1rem;
+}
+
+/* ─── Reduce motion ─────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ─── Loading Bar ───────────────────────────────────── */
+.loading-bar {
+  height: 3px;
+  background: linear-gradient(90deg, #FF4500, #FF8C00, #FFD700, #FF4500);
+  background-size: 300% 100%;
+  animation: gradientShift 1.5s ease infinite;
+}
