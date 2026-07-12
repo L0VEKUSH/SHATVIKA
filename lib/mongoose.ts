@@ -21,25 +21,30 @@ if (!globalThis.__mongoose_cache) {
 
 export async function connectToMongo(): Promise<typeof mongoose> {
   // ── 1. Validate env ──────────────────────────────────────────
-  const uri = process.env.MONGODB_URI;
-  if (!uri) {
+  const requiredVars = ['MONGODB_URI'] as const;
+  const missing = requiredVars.filter((k) => !process.env[k]);
+  if (missing.length) {
     throw new Error(
-      '[connectToMongo] MONGODB_URI is not set.\n' +
-      'Add it to your .env.local file and restart the dev server.'
+      `[connectToMongo] Missing required env var(s): ${missing.join(', ')}\n` +
+        'Copy .env.example → .env.local and restart the dev server.'
     );
   }
+
+  const uri = process.env.MONGODB_URI as string;
+  const dbName = process.env.MONGODB_DB ?? 'SHATVIKA';
+
+  // Helpful, but do NOT log secrets.
+  console.log(`[mongoose] Using dbName=${dbName} uriConfigured=${Boolean(uri)}`);
 
   // ── 2. Return cached connection ──────────────────────────────
   if (cache.conn) return cache.conn;
 
   // ── 3. Create new connection (only once) ────────────────────
   if (!cache.promise) {
-    const dbName = process.env.MONGODB_DB ?? 'SHATVIKA';
-
     cache.promise = mongoose
       .connect(uri, {
         dbName,
-        bufferCommands: false,      // Fail fast — don't silently queue commands
+        bufferCommands: false, // Fail fast — don't silently queue commands
         serverSelectionTimeoutMS: 10_000,
         socketTimeoutMS: 45_000,
       })
@@ -49,7 +54,7 @@ export async function connectToMongo(): Promise<typeof mongoose> {
         return m;
       })
       .catch((err: Error) => {
-        cache.promise = null;       // Allow retry on next call
+        cache.promise = null; // Allow retry on next call
         console.error('[mongoose] Connection error:', err.message);
         throw err;
       });
@@ -57,3 +62,4 @@ export async function connectToMongo(): Promise<typeof mongoose> {
 
   return cache.promise;
 }
+

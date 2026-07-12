@@ -122,8 +122,19 @@ export default function WhyChooseUs() {
 
         {/* Feature cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-16">
-          {features.map((f, i) => (
-            <FeatureCard key={f.id} feature={f} index={i} />
+            {features.map((f, i) => (
+            <FeatureCard
+              key={
+                (f as any).id ??
+                (f as any)._id ??
+                (f as any).slug ??
+                (f as any).code ??
+                (f as any).title ??
+                i
+              }
+              feature={f}
+              index={i}
+            />
           ))}
         </div>
 
@@ -135,8 +146,18 @@ export default function WhyChooseUs() {
           viewport={{ once: true }}
           transition={{ delay: 0.2 }}
         >
-          {stats.map(s => (
-            <StatBox key={s.id} stat={s} />
+            {stats.map((s) => (
+            <StatBox
+              key={
+                (s as any).id ??
+                (s as any)._id ??
+                (s as any).slug ??
+                (s as any).code ??
+                (s as any).value ??
+                (s as any).label
+              }
+              stat={s}
+            />
           ))}
         </motion.div>
 

@@ -136,6 +136,40 @@ export default function OrdersTable({ limit }: { limit?: number }) {
   const { orders } = useAdmin();
   const [filter, setFilter] = useState<OrderStatus | 'All'>('All');
 
+  const [tokenInput, setTokenInput] = useState<string>('');
+  const [tokenLoading, setTokenLoading] = useState(false);
+  const [tokenError, setTokenError] = useState<string | null>(null);
+  const [tokenOrder, setTokenOrder] = useState<Order | null>(null);
+
+  const fetchByToken = async () => {
+    setTokenError(null);
+    setTokenOrder(null);
+
+    const token = Number(tokenInput);
+    if (!Number.isFinite(token)) {
+      setTokenError('Please enter a valid numeric token');
+      return;
+    }
+
+    setTokenLoading(true);
+    try {
+      const res = await fetch(`/api/orders/by-token?token=${encodeURIComponent(String(token))}`);
+      const body = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        setTokenError(body?.error ?? `HTTP_${res.status}`);
+        return;
+      }
+
+      setTokenOrder(body as Order);
+    } catch {
+      setTokenError('Failed to fetch order');
+    } finally {
+      setTokenLoading(false);
+    }
+  };
+
+
   const filtered = orders
     .filter(o => filter === 'All' || o.status === filter)
     .slice(0, limit);
@@ -143,20 +177,22 @@ export default function OrdersTable({ limit }: { limit?: number }) {
   return (
     <div>
       {!limit && (
-        <div className="flex gap-2 mb-4 flex-wrap">
-          {(['All', ...STATUS_OPTIONS] as const).map(s => (
-            <button
-              key={s}
-              onClick={() => setFilter(s)}
-              className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
-                filter === s
-                  ? 'bg-gradient-to-r from-[#FF4500] to-[#FF8C00] text-white border-transparent'
-                  : 'bg-white/5 text-gray-400 border-white/10 hover:text-white'
-              }`}
-            >
-              {s}
-            </button>
-          ))}
+        <div>
+          <div className="flex gap-2 mb-4 flex-wrap">
+            {(['All', ...STATUS_OPTIONS] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setFilter(s)}
+                className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
+                  filter === s
+                    ? 'bg-gradient-to-r from-[#FF4500] to-[#FF8C00] text-white border-transparent'
+                    : 'bg-white/5 text-gray-400 border-white/10 hover:text-white'
+                }`}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

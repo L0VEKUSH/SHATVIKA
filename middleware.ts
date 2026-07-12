@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { verifyAdminToken } from '@/lib/adminJwtEdge';
 
-const PUBLIC_ADMIN_PATHS = ['/admin/login', '/admin/api/login'];
+const PUBLIC_ADMIN_PATHS = ['/admin/login', '/admin/api/login', '/admin/signup', '/admin/api/signup'];
+
 
 function isPublicAdminPath(pathname: string) {
   return PUBLIC_ADMIN_PATHS.some(path => pathname === path || pathname.startsWith(`${path}/`));

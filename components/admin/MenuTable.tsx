@@ -254,8 +254,8 @@ export default function MenuTable() {
         <table className="w-full">
           <thead className="bg-white/3">
             <tr>
-              {['Item', 'Category', 'Variants & Prices', 'Tags', 'Rating', ''].map(h => (
-                <th key={h} className="px-4 py-3 text-left text-[10px] uppercase tracking-wider text-gray-600 font-semibold">{h}</th>
+              {['Item', 'Category', 'Variants & Prices', 'Tags', 'Rating', ''].map((h, idx) => (
+                <th key={`${h}-${idx}`} className="px-4 py-3 text-left text-[10px] uppercase tracking-wider text-gray-600 font-semibold">{h}</th>
               ))}
             </tr>
           </thead>

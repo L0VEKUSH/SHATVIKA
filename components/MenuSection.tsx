@@ -110,14 +110,20 @@ function FoodCard({ item }: { item: MenuItem }) {
 
         {item.variants.length > 1 && (
           <div className="flex flex-wrap gap-2 mt-2">
-            {item.variants.map(variant => (
+            {item.variants.map((variant) => (
               <button
-                key={variant.id}
+                key={
+                  variant.id ??
+                  (variant as any)._id ??
+                  (variant as any).slug ??
+                  (variant as any).code ??
+                  variant.name
+                }
                 onClick={() => setSelectedVariantId(variant.id)}
-                className={`text-[10px] px-2 py-1 rounded-full border transition-colors ${
+                className={`text-[10px] px-3 py-1.5 rounded-full border transition-all duration-200 transform-gpu hover:scale-[1.03] ${
                   selectedVariantId === variant.id
-                    ? 'border-[#FF4500] bg-[#FF4500]/20 text-white'
-                    : 'border-white/10 text-gray-400 hover:border-white/30'
+                    ? 'bg-[#FF4500] text-white border-transparent shadow-[0_0_0_3px_rgba(255,69,0,0.15)]'
+                    : 'bg-[#0f0f0f] text-gray-200 border-white/15 hover:border-white/30'
                 }`}
               >
                 {variant.name}
@@ -129,7 +135,7 @@ function FoodCard({ item }: { item: MenuItem }) {
         <div className="flex items-center justify-between mt-auto pt-2 border-t border-white/5">
           <div className="flex-1 min-w-0">
             <p className="text-sm font-bold text-white truncate">{item.name}</p>
-            <p className="flame-text text-sm font-black mt-0.5">₹{(item.variants[0]?.price || 0).toFixed(2)}</p>
+            <p className="flame-text text-sm font-black mt-0.5">₹{(selectedVariant?.price || 0).toFixed(2)}</p>
           </div>
 
           <button
@@ -248,9 +254,15 @@ export default function MenuSection() {
               exit={{ opacity: 0 }}
               transition={{ duration: 0.25 }}
             >
-              {filtered.map((item, i) => (
+            {filtered.map((item, i) => (
                 <motion.div
-                  key={item.id}
+                  key={
+                    item.id ??
+                    (item as any)._id ??
+                    (item as any).slug ??
+                    (item as any).code ??
+                    item.name
+                  }
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.04 }}

@@ -35,9 +35,11 @@ function escapeHtml(input: string) {
 export async function GET(req: Request) {
   try {
     await connectToMongo();
-  } catch {
+  } catch (err) {
+    console.error('[GET /api/reviews] DB connection failed:', err);
     return NextResponse.json({ ok: false, error: 'DB_UNAVAILABLE' }, { status: 503 });
   }
+
 
   const url = new URL(req.url);
   const menuItemId = url.searchParams.get('menuItemId');
@@ -112,9 +114,11 @@ export async function POST(req: Request) {
 
   try {
     await connectToMongo();
-  } catch {
+  } catch (err) {
+    console.error('[POST /api/reviews] DB connection failed:', err);
     return NextResponse.json({ ok: false, error: 'DB_UNAVAILABLE' }, { status: 503 });
   }
+
 
   const review = await Review.create({
     name: sanitizedName,
@@ -171,9 +175,11 @@ export async function PATCH(req: Request) {
 
   try {
     await connectToMongo();
-  } catch {
+  } catch (err) {
+    console.error('[PATCH /api/reviews] DB connection failed:', err);
     return NextResponse.json({ ok: false, error: 'DB_UNAVAILABLE' }, { status: 503 });
   }
+
 
   const updated = await Review.findByIdAndUpdate(id, { status }, { new: true }).lean();
   if (!updated) return NextResponse.json({ ok: false, error: 'NOT_FOUND' }, { status: 404 });
@@ -195,9 +201,11 @@ export async function DELETE(req: Request) {
 
   try {
     await connectToMongo();
-  } catch {
+  } catch (err) {
+    console.error('[DELETE /api/reviews] DB connection failed:', err);
     return NextResponse.json({ ok: false, error: 'DB_UNAVAILABLE' }, { status: 503 });
   }
+
 
   const deleted = await Review.findByIdAndDelete(id).lean();
   if (!deleted) return NextResponse.json({ ok: false, error: 'NOT_FOUND' }, { status: 404 });
