@@ -5,6 +5,24 @@ import { isAdminJwtAuthed } from '@/lib/adminJwt';
 
 export const dynamic = 'force-dynamic';
 
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    await connectToMongo();
+    const item = await MenuItem.findById(id).lean();
+    if (!item) return NextResponse.json({ error: 'Menu item not found' }, { status: 404 });
+
+    return NextResponse.json(item);
+  } catch (err) {
+    console.error('[GET /api/menu/:id]', err);
+    return NextResponse.json({ error: 'Failed to fetch menu item' }, { status: 500 });
+  }
+}
+
+
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }

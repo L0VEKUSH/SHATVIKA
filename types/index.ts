@@ -11,7 +11,10 @@ export interface MenuItem {
   id: string;
   name: string;
   description: string;
+  ingredients?: string[];
+  images?: string[];
   variants: Variant[];
+  basePrice?: number;
   rating: number;
   reviewCount: number;
   category: Category;
@@ -25,12 +28,16 @@ export interface MenuItem {
 
 export type Category =
   | 'All'
-  | 'Burgers'
-  | 'Pizza'
-  | 'Sandwiches'
+  | 'Momos'
   | 'Fries'
+  | 'Burgers'
+  | 'Patties'
+  | 'Sandwiches'
+  | 'South Indian'
+  | 'Shakes'
   | 'Drinks'
-  | 'Desserts';
+  | 'Desserts'
+  | 'Pizza';
 
 export interface CartItem {
   id: string; // Add id for cart operations
@@ -94,11 +101,21 @@ export interface Offer {
 
 export interface GalleryItem {
   id: string;
-  emoji: string;
-  label: string;
-  gradient: string;
-  tall?: boolean;        // spans extra height in masonry
+  title: string;
+  description?: string;
+  category: string; // 'Food' | 'Restaurant' | 'Team' | 'Events'
+  imageUrl: string;
+  imageType: 'image' | 'video' | 'youtube';
+  youtubeId?: string;
+  featured?: boolean;
+  order?: number;
+  // Legacy fields for backward compatibility
+  emoji?: string;
+  label?: string;
+  gradient?: string;
+  tall?: boolean;
 }
+
 
 export interface TeamMember {
   id: string;

@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { cookies } from 'next/headers';
+import { Admin } from '@/models/Admin';
 
 const COOKIE_NAME = 'admin_session';
 
@@ -40,13 +41,27 @@ function signHS256(header: object, payload: object) {
   return `${data}.${base64url(sig)}`;
 }
 
-export function verifyAdminToken(token: string): boolean {
+export async function verifyAdminToken(token: string): Promise<boolean> {
   const { valid, payload } = verifyHS256(token);
   if (!valid || !payload) return false;
 
-  const fingerprintNow = sha256(`${process.env.ADMIN_EMAIL ?? ''}:${process.env.ADMIN_PASSWORD ?? ''}`);
-  return payload.fp === fingerprintNow;
+  // Check that fingerprint exists and is non-empty.
+  if (typeof payload.fp !== 'string' || payload.fp.length === 0) return false;
+
+  // Check that adminId exists and is non-empty.
+  const adminId = payload.aid;
+  if (typeof adminId !== 'string' || adminId.length === 0) return false;
+
+  // Verify the admin still exists in MongoDB.
+  try {
+    const admin = await Admin.findById(adminId).lean();
+    if (!admin) return false;
+    return true;
+  } catch {
+    return false;
+  }
 }
+
 
 function verifyHS256(token: string): { valid: boolean; payload?: Record<string, unknown> } {
   const secret = getJwtSecret();
@@ -80,19 +95,30 @@ function verifyHS256(token: string): { valid: boolean; payload?: Record<string, 
   }
 }
 
-export async function setAdminJwtSession() {
+// New: adminId-based session for MongoDB auth.
+// adminData is the full admin document needed to extract password hash for fingerprint.
+export async function setAdminJwtSession(adminId?: string, adminData?: any) {
+
   const jwtSecret = getJwtSecret();
   if (!jwtSecret) throw new Error('ADMIN_JWT_SECRET not configured');
 
   // exp: 8 hours
   const exp = Date.now() + 60 * 60 * 8 * 1000;
 
-  // Payload includes a fingerprint so secrets/creds changes invalidate sessions.
-  const fingerprint = sha256(`${process.env.ADMIN_EMAIL ?? ''}:${process.env.ADMIN_PASSWORD ?? ''}`);
+  const subject = 'admin';
+
+  // Fingerprint includes adminId, passwordVersion, and last 20 chars of password hash
+  // so that old tokens invalidate when password changes.
+  let fingerprintData = `${adminId ?? ''}`;
+  if (adminData && adminData.password && adminData.passwordVersion !== undefined) {
+    const passwordSuffix = String(adminData.password ?? '').slice(-20);
+    fingerprintData = `${adminId}:${adminData.passwordVersion}:${passwordSuffix}`;
+  }
+  const fingerprint = sha256(fingerprintData);
 
   const token = signHS256(
     { alg: 'HS256', typ: 'JWT' },
-    { sub: 'admin', fp: fingerprint, exp }
+    { sub: subject, aid: adminId, fp: fingerprint, exp }
   );
 
   const store = await cookies();
@@ -100,10 +126,11 @@ export async function setAdminJwtSession() {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    path: '/admin',
+    path: '/',
     maxAge: 60 * 60 * 8,
   });
 }
+
 
 export async function clearAdminJwtSession() {
   const store = await cookies();
@@ -114,6 +141,6 @@ export async function isAdminJwtAuthed() {
   const store = await cookies();
   const token = store.get(COOKIE_NAME)?.value;
   if (!token) return false;
-  return verifyAdminToken(token);
+  return await verifyAdminToken(token);
 }
 

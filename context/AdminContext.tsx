@@ -18,6 +18,10 @@ export interface Order {
   createdAt?: string;
   time: string;
   address: string;
+  email?: string;
+  phone?: string;
+  specialInstructions?: string;
+  paymentStatus?: string;
 }
 
 export type CouponVisibility = 'public' | 'private';
@@ -32,7 +36,63 @@ export interface Coupon {
   visibility: CouponVisibility;
 }
 
+function normalizeOrderStatus(orderStatus?: string): OrderStatus {
+  switch (orderStatus) {
+    case 'pending': return 'Pending';
+    case 'accepted':
+    case 'preparing': return 'Cooking';
+    case 'ready':
+    case 'out_for_delivery': return 'Out for Delivery';
+    case 'delivered': return 'Delivered';
+    case 'cancelled': return 'Cancelled';
+    default: return 'Pending';
+  }
+}
+
+function normalizeBackendOrder(order: any): Order {
+  return {
+    id: String(order.id ?? order._id),
+    token: Number(String(order._id ?? order.id).slice(-4)) || 0,
+    customer: order.customerName ?? order.deliveryAddress?.name ?? 'Customer',
+    avatar: '👤',
+    items: (order.items || []).map((item: any) => ({
+      name: item.name,
+      qty: item.quantity ?? item.qty ?? 1,
+      price: item.unitPrice ?? item.price ?? 0,
+    })),
+    total: order.totalAmount ?? order.total ?? 0,
+    status: normalizeOrderStatus(order.orderStatus ?? order.status),
+    createdAt: order.createdAt,
+    time: order.createdAt ? new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+    address: [order.deliveryAddress?.street, order.deliveryAddress?.city, order.deliveryAddress?.state]
+      .filter(Boolean)
+      .join(', ') || 'Delivery address',
+    email: order.user?.email || order.customerEmail || 'Unknown Email',
+    phone: order.deliveryAddress?.phone || order.customerPhone || 'No Phone',
+    specialInstructions: order.specialInstructions || '',
+    paymentStatus: order.paymentStatus || 'pending',
+  };
+}
+
+function normalizeBackendCoupon(coupon: any): Coupon {
+  const discountPercent = coupon.discountType === 'percentage'
+    ? Number(coupon.discountValue || 0)
+    : Number(coupon.discountValue || 0);
+
+  return {
+    id: String(coupon.id ?? coupon._id),
+    code: String(coupon.code ?? '').toUpperCase(),
+    discountPercent,
+    active: Boolean(coupon.isActive),
+    usageCount: Number(coupon.usageCount ?? 0),
+    expiry: coupon.expiresAt ? String(coupon.expiresAt).slice(0, 10) : '',
+    visibility: coupon.applicableCategories?.length ? 'private' : 'public',
+  };
+}
+
 interface AdminContextType {
+  /* loading state */
+  isLoading: boolean;
   /* menu */
   adminMenuItems: MenuItem[];
   updateMenuItem: (id: string, patch: Partial<MenuItem>) => void;
@@ -82,13 +142,12 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const [features, setFeatures] = useState<Feature[]>([]);
   const [stats, setStats] = useState<Stat[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Seed and fetch data
+    // Fetch data without auto-seeding runtime content.
     async function loadData() {
       try {
-        await fetch('/api/seed'); // Auto-seed if empty
-        
         const [menuRes, orderRes, couponRes, reviewRes, featureRes, statRes, teamRes, galleryRes] = await Promise.all([
           fetch('/api/menu').then(r => r.json()),
           fetch('/api/orders').then(r => r.json()),
@@ -101,15 +160,17 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         ]);
 
         if (Array.isArray(menuRes)) setAdminMenuItems(menuRes);
-        if (Array.isArray(orderRes)) setOrders(orderRes);
-        if (Array.isArray(couponRes)) setCoupons(couponRes);
+        if (Array.isArray(orderRes)) setOrders(orderRes.map(normalizeBackendOrder));
+        if (Array.isArray(couponRes)) setCoupons(couponRes.map(normalizeBackendCoupon));
         if (reviewRes?.reviews) setReviews(reviewRes.reviews);
         if (Array.isArray(featureRes)) setFeatures(featureRes);
         if (Array.isArray(statRes)) setStats(statRes);
         if (Array.isArray(teamRes)) setTeamMembers(teamRes);
         if (Array.isArray(galleryRes)) setGalleryItems(galleryRes);
+        setIsLoading(false);
       } catch (err) {
         console.error('Failed to fetch admin data', err);
+        setIsLoading(false);
       }
     }
     loadData();
@@ -134,18 +195,24 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   /* Order actions */
   const addOrder = useCallback(async (order: Order) => {
     setOrders(prev => [order, ...prev]);
-    await fetch('/api/orders', { method: 'POST', body: JSON.stringify(order) });
   }, []);
 
   const updateOrderStatus = useCallback(async (id: string, status: OrderStatus) => {
     setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o));
-    await fetch(`/api/orders/${id}`, { method: 'PUT', body: JSON.stringify({ status }) });
+    await fetch(`/api/orders/${id}`, { method: 'PUT', body: JSON.stringify({ orderStatus: status.toLowerCase().replace(/ /g, '_') }) });
   }, []);
 
   /* Coupon actions */
   const addCoupon = useCallback(async (c: Coupon) => {
     setCoupons(prev => [c, ...prev]);
-    await fetch('/api/coupons', { method: 'POST', body: JSON.stringify(c) });
+    await fetch('/api/coupons', { method: 'POST', body: JSON.stringify({
+      code: c.code,
+      discountType: 'percentage',
+      discountValue: c.discountPercent,
+      expiresAt: new Date(c.expiry).toISOString(),
+      isActive: c.active,
+      applicableCategories: c.visibility === 'private' ? ['Private'] : [],
+    }) });
   }, []);
 
   const deleteCoupon = useCallback(async (id: string) => {
@@ -154,12 +221,16 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const toggleCoupon = useCallback(async (id: string) => {
-    setCoupons(prev => {
-      const c = prev.find(x => x.id === id);
-      if (c) fetch(`/api/coupons/${id}`, { method: 'PUT', body: JSON.stringify({ active: !c.active }) });
-      return prev.map(c => c.id === id ? { ...c, active: !c.active } : c);
-    });
-  }, []);
+    const coupon = coupons.find(x => x.id === id);
+    if (coupon) {
+      setCoupons(prev => prev.map(c => c.id === id ? { ...c, active: !c.active } : c));
+      try {
+        await fetch(`/api/coupons/${id}`, { method: 'PUT', body: JSON.stringify({ isActive: !coupon.active }) });
+      } catch (err) {
+        console.error('Failed to toggle coupon', err);
+      }
+    }
+  }, [coupons]);
 
   /* Reviews */
   const addReview = useCallback(async (review: Review) => {
@@ -232,6 +303,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   return (
     <AdminContext.Provider value={{
+      isLoading,
       adminMenuItems, updateMenuItem, deleteMenuItem, addMenuItem,
       orders, addOrder, updateOrderStatus,
       coupons, addCoupon, deleteCoupon, toggleCoupon,

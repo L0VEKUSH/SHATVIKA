@@ -195,12 +195,14 @@ body {
 }
 
 /* ─── Food Card Gradients ───────────────────────────── */
-.grad-burger   { background: linear-gradient(135deg, #1a0800 0%, #2d1000 100%); }
-.grad-pizza    { background: linear-gradient(135deg, #1a0000 0%, #2d0800 100%); }
-.grad-sandwich { background: linear-gradient(135deg, #1a1000 0%, #2d1800 100%); }
-.grad-fries    { background: linear-gradient(135deg, #1a1200 0%, #2d1e00 100%); }
-.grad-drinks   { background: linear-gradient(135deg, #00081a 0%, #00122d 100%); }
-.grad-desserts { background: linear-gradient(135deg, #1a0018 0%, #2d002d 100%); }
+.grad-burger       { background: linear-gradient(135deg, #1a0800 0%, #2d1000 100%); }
+.grad-momos        { background: linear-gradient(135deg, #1a0000 0%, #2d0800 100%); }
+.grad-patties      { background: linear-gradient(135deg, #1a0a00 0%, #2d1400 100%); }
+.grad-south-indian { background: linear-gradient(135deg, #1a1500 0%, #2d2000 100%); }
+.grad-sandwich     { background: linear-gradient(135deg, #1a1000 0%, #2d1800 100%); }
+.grad-fries        { background: linear-gradient(135deg, #1a1200 0%, #2d1e00 100%); }
+.grad-drinks       { background: linear-gradient(135deg, #00081a 0%, #00122d 100%); }
+.grad-desserts     { background: linear-gradient(135deg, #1a0018 0%, #2d002d 100%); }
 
 /* ─── Star Rating ───────────────────────────────────── */
 .star-filled  { color: #FFD700; }

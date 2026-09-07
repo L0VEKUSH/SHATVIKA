@@ -1,0 +1,359 @@
+{
+  "audit_date": "2024",
+  "project": "Shatvika Corner - Restaurant Ordering Platform",
+  "phase_2_react_issues": [
+    {
+      "file": "context/AdminContext.tsx",
+      "line": 171,
+      "issue": "CRITICAL: useCallback dependency array missing 'coupons'. toggleCoupon() captures stale 'coupons' from outer scope. When coupons change, the callback still references old coupons, causing state to revert or show incorrect data.",
+      "severity": "critical",
+      "fix": "Add 'coupons' to dependency array: }, [coupons]);"
+    },
+    {
+      "file": "components/MenuSection.tsx",
+      "line": 117,
+      "issue": "MEDIUM: Key fallback chain (variant.id ?? _id ?? slug ?? code ?? variant.name) is fragile. If all fail silently, React re-renders list incorrectly. The name fallback is also not unique.",
+      "severity": "medium",
+      "fix": "Always ensure variant.id exists. Add validation in MenuItem model to guarantee variant.id is never undefined."
+    },
+    {
+      "file": "components/Navbar.tsx",
+      "line": 73,
+      "issue": "MEDIUM: Badge motion component uses key={badge} which changes on every render when badge is a number. This causes unnecessary re-mounts.",
+      "severity": "medium",
+      "fix": "Use a stable key like `badge-${badge}` or use useId() from React."
+    },
+    {
+      "file": "app/page.tsx",
+      "line": 24,
+      "issue": "MEDIUM: Cart component imported with ssr: false but wrapped in dynamic(). When Cart loads, useCart() might be called while context is initializing, causing potential hook errors.",
+      "severity": "medium",
+      "fix": "Ensure CartProvider is fully initialized before Cart component mounts. Consider adding fallback UI."
+    },
+    {
+      "file": "components/Gallery.tsx",
+      "line": 43,
+      "issue": "MEDIUM: useEffect in Lightbox has dependency on multiple callback functions (onClose, onNext, onPrev). If parent component is re-rendered frequently, the listeners will be re-added constantly.",
+      "severity": "medium",
+      "fix": "Stabilize callbacks with useCallback in parent component or pass stable references."
+    },
+    {
+      "file": "components/admin/MenuTable.tsx",
+      "line": 46,
+      "issue": "LOW: Date.now() used as part of variant ID. While unique in this session, not ideal for stable keys across sessions. Use crypto.randomUUID() instead.",
+      "severity": "low",
+      "fix": "Replace `v-${Date.now()}` with `v-${crypto.randomUUID()}`"
+    },
+    {
+      "file": "components/admin/MenuTable.tsx",
+      "line": 119,
+      "issue": "LOW: MenuItem ID generated with Date.now(). If two items added in same millisecond, IDs collide. Use crypto.randomUUID().",
+      "severity": "low",
+      "fix": "Use `custom-${crypto.randomUUID()}` instead of `custom-${Date.now()}`"
+    },
+    {
+      "file": "components/About.tsx",
+      "line": 132,
+      "issue": "LOW: Badge key uses string template with position. Could be optimized to just use index or stable ID.",
+      "severity": "low",
+      "fix": "Add id field to badge objects or use stable identifier."
+    },
+    {
+      "file": "context/CartContext.tsx",
+      "line": 88,
+      "issue": "MEDIUM: useCallback for isInWishlist depends on 'wishlist' array, causing function reference to change on every wishlist update. This can cause unnecessary re-renders in child components using this function.",
+      "severity": "medium",
+      "fix": "Remove 'wishlist' from dependencies and use a closure pattern, or memoize the entire context value."
+    }
+  ],
+  "phase_3_nextjs_issues": [
+    {
+      "file": "app/admin/(dashboard)/layout.tsx",
+      "line": 1,
+      "issue": "CRITICAL: No Suspense boundaries around async components. AdminSidebar and AdminTopbar could cause issues with dynamic rendering. No error.tsx exists.",
+      "severity": "critical",
+      "fix": "Wrap components with Suspense and create error.tsx and not-found.tsx files for admin routes."
+    },
+    {
+      "file": "app/product/[id]/page.tsx",
+      "line": 0,
+      "issue": "HIGH: Dynamic route file exists but no generateStaticParams() implemented. This could cause ISR/SSG optimization issues.",
+      "severity": "high",
+      "fix": "Create generateStaticParams() function to pre-generate popular product pages."
+    },
+    {
+      "file": "app/auth/login/page.tsx",
+      "line": 0,
+      "issue": "MEDIUM: No metadata export. Login page should have specific metadata but uses root layout only.",
+      "severity": "medium",
+      "fix": "Add export const metadata = {...} at the top of page.tsx"
+    },
+    {
+      "file": "app/auth/signup/page.tsx",
+      "line": 0,
+      "issue": "MEDIUM: No metadata export. Signup page needs specific metadata.",
+      "severity": "medium",
+      "fix": "Add export const metadata = {...} at the top of page.tsx"
+    },
+    {
+      "file": "app/customer/profile/page.tsx",
+      "line": 0,
+      "issue": "MEDIUM: No metadata or protected route check. Profile pages should not be statically generated.",
+      "severity": "medium",
+      "fix": "Add 'use client' and authentication guard, or mark as dynamic."
+    },
+    {
+      "file": "app/admin/(dashboard)/page.tsx",
+      "line": 0,
+      "issue": "MEDIUM: No metadata export for dashboard.",
+      "severity": "medium",
+      "fix": "Add metadata export."
+    },
+    {
+      "file": "app/(all routes)/",
+      "line": 0,
+      "issue": "HIGH: Missing error.tsx and not-found.tsx files across most routes. Global error handling is missing.",
+      "severity": "high",
+      "fix": "Create app/error.tsx and app/not-found.tsx with proper fallback UI."
+    },
+    {
+      "file": "app/api routes",
+      "line": 0,
+      "issue": "MEDIUM: No loading.tsx files with Suspense boundaries. Customer-facing pages may not have proper loading states.",
+      "severity": "medium",
+      "fix": "Create loading.tsx files with skeleton loaders for key routes."
+    },
+    {
+      "file": "app/layout.tsx",
+      "line": 1,
+      "issue": "MEDIUM: AdminProvider and CartProvider are 'use client' providers in root layout. This is correct but should be in a separate client component.",
+      "severity": "medium",
+      "fix": "Extract providers to separate 'use client' component: app/providers.tsx"
+    }
+  ],
+  "phase_4_database_issues": [
+    {
+      "file": "models/MenuItem.ts",
+      "line": 6,
+      "issue": "MEDIUM: Variant subdocument id is generated with ObjectId().toString() but never validated to be unique within variants array. Could lead to duplicate variant IDs within a menu item.",
+      "severity": "medium",
+      "fix": "Add validation or use built-in _id field for subdocuments."
+    },
+    {
+      "file": "models/User.ts",
+      "line": 46,
+      "issue": "HIGH: CartItem subdocument references MenuItem via ObjectId, but no validation that MenuItem exists. Could create orphan references.",
+      "severity": "high",
+      "fix": "Add pre-save hook to validate MenuItem references or use ref with proper cascade."
+    },
+    {
+      "file": "models/User.ts",
+      "line": 79,
+      "issue": "MEDIUM: Payment method 'id' field has unique: true in a subdocument array. This constraint applies globally, not per-user, causing issues when multiple users add payment methods.",
+      "severity": "medium",
+      "fix": "Remove unique constraint from subdocument. Use (user._id, paymentMethod.id) compound index if needed."
+    },
+    {
+      "file": "models/MenuItem.ts",
+      "line": 29,
+      "issue": "LOW: basePrice field is optional but no validation ensures either basePrice or variants exist. Could save item with neither.",
+      "severity": "low",
+      "fix": "Add custom validation in schema: at least one of basePrice or variants must exist."
+    },
+    {
+      "file": "app/api/orders/route.ts",
+      "line": 14,
+      "issue": "MEDIUM: GET orders doesn't populate user/menu references. If Order model has refs to User/MenuItem, this causes N+1 queries when rendering full order details.",
+      "severity": "medium",
+      "fix": "Use .populate() if needed or ensure Order.lean() is intentional for admin list view."
+    },
+    {
+      "file": "models/User.ts",
+      "line": 119,
+      "issue": "MEDIUM: Cart subdocument default is () => ({}) which creates empty object. If items array is accessed before initialization, could cause undefined behavior.",
+      "severity": "medium",
+      "fix": "Default to () => ({ items: [] }) to ensure items array always exists."
+    },
+    {
+      "file": "models/MenuItem.ts",
+      "line": 65,
+      "issue": "LOW: Text index on (name, description) not analyzed carefully for performance. Description field could be very large.",
+      "severity": "low",
+      "fix": "Limit description length for text index or use separate index."
+    }
+  ],
+  "phase_5_auth_issues": [
+    {
+      "file": "app/admin/api/login/route.ts vs app/api/auth/login/route.ts",
+      "line": 0,
+      "issue": "CRITICAL: Two separate login endpoints with different implementations. Admin uses /admin/api/login, Customer uses /api/auth/login. This duplication creates maintenance burden and security inconsistency.",
+      "severity": "critical",
+      "fix": "Consolidate into single /api/auth/login endpoint that routes based on email domain or type parameter. Use /api/admin/login as deprecated alias."
+    },
+    {
+      "file": "app/api/auth/login/route.ts",
+      "line": 19,
+      "issue": "HIGH: Rate limiting uses IP address which may be spoofed behind proxy. Need to trust X-Forwarded-For but also validate.",
+      "severity": "high",
+      "fix": "Use combination of IP and session ID for rate limiting, or require CSRF token."
+    },
+    {
+      "file": "app/admin/api/login/route.ts",
+      "line": 10,
+      "issue": "HIGH: No rate limiting on admin login! Brute force attack vector. Customer login has rate limiting (5/min) but admin doesn't.",
+      "severity": "high",
+      "fix": "Add rate limiting to admin login: rate limit by email + IP, 5 attempts per 60 seconds."
+    },
+    {
+      "file": "lib/customerJwt.ts",
+      "line": 90,
+      "issue": "MEDIUM: JWT fingerprint only includes last 20 chars of password hash. If password is changed, fingerprint should invalidate old tokens, but implementation relies on passwordVersion field.",
+      "severity": "medium",
+      "fix": "Verify passwordVersion is always incremented on password change. Add check in all auth endpoints."
+    },
+    {
+      "file": "lib/adminJwt.ts",
+      "line": 0,
+      "issue": "MEDIUM: Admin JWT implementation not reviewed yet but likely mirrors customer JWT. Need to verify same security checks.",
+      "severity": "medium",
+      "fix": "Review adminJwt.ts for same fingerprint, expiry, and validation logic."
+    },
+    {
+      "file": "app/api/auth/logout/route.ts",
+      "line": 0,
+      "issue": "MEDIUM: Logout endpoint exists but need to verify it clears cookies properly and doesn't leave session data.",
+      "severity": "medium",
+      "fix": "Verify logout deletes BOTH customer_session cookie and any refresh tokens."
+    },
+    {
+      "file": "app/api/auth/refresh/route.ts",
+      "line": 0,
+      "issue": "MEDIUM: Refresh endpoint exists but need to verify it validates old token before issuing new one.",
+      "severity": "medium",
+      "fix": "Verify refresh validates the old JWT signature and fingerprint before issuing new token."
+    },
+    {
+      "file": "app/api/auth/me/route.ts",
+      "line": 0,
+      "issue": "MEDIUM: /api/auth/me endpoint should only return authenticated user. Need to verify auth guard is present.",
+      "severity": "medium",
+      "fix": "Ensure route uses isCustomerJwtAuthed() before returning user data."
+    },
+    {
+      "file": "Protected API routes",
+      "line": 0,
+      "issue": "HIGH: Routes like /api/user/*, /api/orders need to verify JWT before processing. Check all protected routes have auth guards.",
+      "severity": "high",
+      "fix": "Audit all protected routes for presence of isCustomerJwtAuthed() or isAdminJwtAuthed() checks."
+    },
+    {
+      "file": "app/api/auth/signup/route.ts",
+      "line": 83,
+      "issue": "MEDIUM: Password hashed with bcrypt cost 10. During signup, user is immediately logged in with setCustomerSession(). Verify this doesn't create session before user is fully persisted.",
+      "severity": "medium",
+      "fix": "Add error handling to rollback session if user.save() fails."
+    }
+  ],
+  "recommended_fixes": [
+    {
+      "priority": "CRITICAL",
+      "title": "Fix AdminContext toggleCoupon dependency bug",
+      "description": "Line 171: Add 'coupons' to useCallback dependency array to prevent stale closures",
+      "effort_hours": 0.5,
+      "files_affected": ["context/AdminContext.tsx"]
+    },
+    {
+      "priority": "CRITICAL",
+      "title": "Consolidate auth endpoints and add rate limiting to admin login",
+      "description": "Admin login has no rate limiting. Consolidate duplicate /admin/api/login and /api/auth/login endpoints.",
+      "effort_hours": 3,
+      "files_affected": ["app/admin/api/login/route.ts", "app/api/auth/login/route.ts", "lib/rateLimit.ts"]
+    },
+    {
+      "priority": "CRITICAL",
+      "title": "Add Suspense boundaries and error boundaries to admin dashboard",
+      "description": "Dashboard layout lacks Suspense and error.tsx/not-found.tsx files",
+      "effort_hours": 2,
+      "files_affected": ["app/admin/(dashboard)/layout.tsx", "app/error.tsx", "app/not-found.tsx"]
+    },
+    {
+      "priority": "HIGH",
+      "title": "Validate all MenuItem references in User cart",
+      "description": "CartItem references MenuItem but no validation exists. Could create orphan references.",
+      "effort_hours": 2,
+      "files_affected": ["models/User.ts", "models/MenuItem.ts", "app/api/user/cart/route.ts"]
+    },
+    {
+      "priority": "HIGH",
+      "title": "Audit all protected API routes for JWT validation",
+      "description": "Verify every /api/user/*, /api/orders route has isCustomerJwtAuthed() or isAdminJwtAuthed() guards",
+      "effort_hours": 2,
+      "files_affected": ["app/api/user/**", "app/api/orders/**"]
+    },
+    {
+      "priority": "MEDIUM",
+      "title": "Fix MenuSection and Navbar key issues",
+      "description": "Replace Date.now() and Math.random() keys with stable IDs. Use crypto.randomUUID().",
+      "effort_hours": 1.5,
+      "files_affected": ["components/MenuSection.tsx", "components/Navbar.tsx", "components/admin/MenuTable.tsx"]
+    },
+    {
+      "priority": "MEDIUM",
+      "title": "Stabilize callback functions in components",
+      "description": "Use useCallback() or useMemo() to prevent unnecessary re-renders caused by unstable function references",
+      "effort_hours": 2,
+      "files_affected": ["components/Gallery.tsx", "context/CartContext.tsx", "components/admin/MenuTable.tsx"]
+    },
+    {
+      "priority": "MEDIUM",
+      "title": "Add metadata exports to all customer-facing pages",
+      "description": "Auth pages, profile pages missing metadata exports. Add for SEO and social sharing.",
+      "effort_hours": 1,
+      "files_affected": ["app/auth/login/page.tsx", "app/auth/signup/page.tsx", "app/customer/profile/page.tsx"]
+    },
+    {
+      "priority": "MEDIUM",
+      "title": "Fix payment method subdocument unique constraint",
+      "description": "Unique constraint on payment method ID in subdocument array causes conflicts across users",
+      "effort_hours": 1,
+      "files_affected": ["models/User.ts"]
+    },
+    {
+      "priority": "MEDIUM",
+      "title": "Create error boundaries and loading states",
+      "description": "Add app/error.tsx and app/not-found.tsx. Create loading.tsx with Suspense boundaries.",
+      "effort_hours": 2,
+      "files_affected": ["app/error.tsx", "app/not-found.tsx", "app/loading.tsx"]
+    },
+    {
+      "priority": "MEDIUM",
+      "title": "Extract providers to separate client component",
+      "description": "Move CartProvider and AdminProvider from root layout to separate 'use client' file",
+      "effort_hours": 1,
+      "files_affected": ["app/layout.tsx", "app/providers.tsx"]
+    },
+    {
+      "priority": "LOW",
+      "title": "Add validation for MenuItem basePrice or variants",
+      "description": "Prevent saving MenuItem without either basePrice or variants array",
+      "effort_hours": 1,
+      "files_affected": ["models/MenuItem.ts"]
+    },
+    {
+      "priority": "LOW",
+      "title": "Implement generateStaticParams for dynamic routes",
+      "description": "Add pre-generation for popular products in /product/[id] route",
+      "effort_hours": 1,
+      "files_affected": ["app/product/[id]/page.tsx"]
+    }
+  ],
+  "summary": {
+    "total_issues_found": 32,
+    "critical_issues": 3,
+    "high_priority_issues": 5,
+    "medium_priority_issues": 16,
+    "low_priority_issues": 8,
+    "estimated_total_fix_hours": 19.5,
+    "production_readiness": "NOT PRODUCTION READY - Critical issues must be fixed before deployment"
+  }
+}

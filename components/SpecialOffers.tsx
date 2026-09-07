@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Copy, Check, Clock, Tag } from 'lucide-react';
 import { useAdmin } from '@/context/AdminContext';
@@ -14,88 +14,49 @@ type CouponOffer = {
   expiry: string;
 };
 
-function getOfferCopy(coupon: CouponOffer, index: number) {
-  const base = {
-    title: 'Limited Time Offer',
-    description: 'Use this code at checkout for an instant discount.',
+function getOfferCopy(coupon: CouponOffer) {
+  return {
+    title: `${coupon.discountPercent}% Off — ${coupon.code}`,
+    description: coupon.expiry
+      ? `Valid until ${new Date(coupon.expiry).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`
+      : 'Use this code at checkout for an instant discount.',
     emoji: '🏷️',
     badgeText: 'Active Code',
     gradient: 'linear-gradient(135deg, rgba(255,69,0,0.22), rgba(255,140,0,0.08))',
   };
-
-  if (coupon.code === 'FLAME30') {
-    return {
-      ...base,
-      title: 'Flame Feast Combo',
-      description: 'A strong discount for the house favorite bundle.',
-      emoji: '🔥',
-      badgeText: 'Best Deal',
-    };
-  }
-
-  if (coupon.code === 'PIZZA25') {
-    return {
-      ...base,
-      title: 'Pizza Party Pack',
-      description: 'A public coupon for larger orders and group meals.',
-      emoji: '🍕',
-      badgeText: 'Group Deal',
-      gradient: 'linear-gradient(135deg, rgba(220,20,60,0.22), rgba(255,69,0,0.08))',
-    };
-  }
-
-  if (coupon.code === 'HAPPY50') {
-    return {
-      ...base,
-      title: 'Happy Hour Special',
-      description: 'A high-value coupon for the most generous discounts.',
-      emoji: '⚡',
-      badgeText: 'Limited Time',
-      gradient: 'linear-gradient(135deg, rgba(180,83,9,0.24), rgba(255,215,0,0.08))',
-    };
-  }
-
-  return {
-    ...base,
-    title: `${coupon.code} Offer`,
-    description: ' ',
-    emoji: index % 2 === 0 ? '🏷️' : '🎁',
-    gradient: `linear-gradient(135deg, rgba(255,69,0,0.18), rgba(255,140,0,0.06))`,
-  };
 }
 
 /* ── Countdown logic ───────────────────────────────── */
-function useCountdown(targetHours: number) {
-  const getTarget = useCallback(() => {
-    const t = new Date();
-    t.setHours(t.getHours() + targetHours);
-    return t;
-  }, [targetHours]);
-
-  const [target] = useState<Date>(getTarget);
-  const [timeLeft, setTimeLeft] = useState({ h: 0, m: 0, s: 0 });
+function useCountdownToDate(targetDate: Date | null) {
+  const [timeLeft, setTimeLeft] = useState({ h: 0, m: 0, s: 0, expired: true });
 
   useEffect(() => {
+    if (!targetDate) return;
     const tick = () => {
-      const diff = Math.max(0, target.getTime() - Date.now());
+      const diff = Math.max(0, targetDate.getTime() - Date.now());
       setTimeLeft({
         h: Math.floor(diff / 3_600_000),
         m: Math.floor((diff % 3_600_000) / 60_000),
         s: Math.floor((diff % 60_000) / 1_000),
+        expired: diff <= 0,
       });
     };
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [target]);
+  }, [targetDate]);
 
   return timeLeft;
 }
 
-/* ── Countdown display ─────────────────────────────── */
-function Countdown({ hours }: { hours: number }) {
-  const { h, m, s } = useCountdown(hours);
+function Countdown({ expiry }: { expiry: string }) {
+  const target = expiry ? new Date(expiry) : null;
+  const { h, m, s, expired } = useCountdownToDate(target);
   const pad = (n: number) => String(n).padStart(2, '0');
+
+  if (!expiry || expired) {
+    return <p className="text-xs text-white/60">Offer expired</p>;
+  }
 
   return (
     <div className="flex items-center gap-1.5">
@@ -103,9 +64,7 @@ function Countdown({ hours }: { hours: number }) {
       <span className="text-xs font-semibold text-white/80">Ends in</span>
       {[pad(h), pad(m), pad(s)].map((val, i) => (
         <span key={`time-${i}-${val}`} className="flex items-center gap-0.5">
-          <span className="bg-black/30 text-white text-xs font-black px-1.5 py-0.5 rounded">
-            {val}
-          </span>
+          <span className="bg-black/30 text-white text-xs font-black px-1.5 py-0.5 rounded">{val}</span>
           {i < 2 && <span className="text-white/50 text-xs font-bold">:</span>}
         </span>
       ))}
@@ -115,14 +74,13 @@ function Countdown({ hours }: { hours: number }) {
 
 /* ── Offer card ────────────────────────────────────── */
 function OfferCard({
-  offer, index, countdownHours,
+  offer, index,
 }: {
   offer: CouponOffer;
   index: number;
-  countdownHours: number;
 }) {
   const [copied, setCopied] = useState(false);
-  const meta = getOfferCopy(offer, index);
+  const meta = getOfferCopy(offer);
 
   const copy = () => {
     navigator.clipboard.writeText(offer.code).catch(() => {});
@@ -163,7 +121,7 @@ function OfferCard({
 
       {/* Coupon row */}
       <div className="p-5 pt-4 flex flex-col gap-3">
-        <Countdown hours={countdownHours} />
+        <Countdown expiry={offer.expiry} />
 
         <div className="flex items-center gap-2">
           <div className="flex-1 flex items-center gap-2 bg-black/30 backdrop-blur-sm
@@ -196,9 +154,7 @@ function OfferCard({
 export default function SpecialOffers() {
   const { coupons } = useAdmin();
 
-  const activeCoupons = coupons.filter(c => c.active && c.visibility === 'public');
-
-  const countdowns = activeCoupons.map((_, index) => [5, 11, 3, 8, 12][index % 5]);
+  const activeCoupons = coupons.filter(c => c.active && c.visibility === 'public' && (!c.expiry || new Date(c.expiry) > new Date()));
 
   return (
     <section className="section-pad bg-[#0a0a0a]">
@@ -219,8 +175,8 @@ export default function SpecialOffers() {
             Hot <span className="flame-text">Deals</span> &amp; Offers
           </h2>
           <p className="text-gray-400 max-w-lg mx-auto text-sm md:text-base">
-          No active public offers right now. Private coupons are managed for known persons in the admin panel.
-        </p>
+            Exclusive discounts managed in the admin panel. Copy a code and apply it at checkout.
+          </p>
 
         </motion.div>
 
@@ -232,7 +188,6 @@ export default function SpecialOffers() {
                 key={offer.id}
                 offer={offer}
                 index={i}
-                countdownHours={countdowns[i]}
               />
             ))}
           </div>
@@ -241,7 +196,7 @@ export default function SpecialOffers() {
             <p className="text-4xl mb-3">🏷️</p>
             <h3 className="text-xl font-black text-white mb-2">No active offers yet</h3>
             <p className="text-gray-400 text-sm max-w-xl mx-auto">
-             
+              Check back soon for exclusive deals! Subscribe to never miss an offer.
             </p>
           </div>
         )}

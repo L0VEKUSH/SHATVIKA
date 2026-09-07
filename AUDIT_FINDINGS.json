@@ -1,0 +1,96 @@
+{
+  "files_audited": [
+    "app/admin/(dashboard)/content/page.tsx",
+    "components/admin/MenuTable.tsx",
+    "components/About.tsx",
+    "components/admin/AdminSidebar.tsx",
+    "components/Navbar.tsx",
+    "components/MenuSection.tsx",
+    "context/CartContext.tsx",
+    "context/AdminContext.tsx"
+  ],
+  "issues_found": [
+    {
+      "file": "context/AdminContext.tsx",
+      "line": 86,
+      "type": "state-update-in-effect-during-render",
+      "severity": "critical",
+      "code_snippet": "useEffect(() => {\n  async function loadData() {\n    ...\n    if (Array.isArray(menuRes)) setAdminMenuItems(menuRes);\n    if (Array.isArray(orderRes)) setOrders(orderRes);\n    if (Array.isArray(couponRes)) setCoupons(couponRes);\n    if (reviewRes?.reviews) setReviews(reviewRes.reviews);\n    ...\n  }\n  loadData();\n}, []);",
+      "explanation": "ROOT CAUSE: AdminProvider initializes with empty state arrays, then immediately (on mount) fetches data and calls multiple setState functions. Since many child components (AdminContentPage, MenuTable, About) call useAdmin() and read these values, they cause re-renders while those setState calls are batched/pending. This violates React's 'no setState during render' rule and triggers HotReload warnings. The fix is to use a loading state or guard the context reads."
+    },
+    {
+      "file": "app/admin/(dashboard)/content/page.tsx",
+      "line": 143,
+      "type": "state-update-during-context-read",
+      "severity": "critical",
+      "code_snippet": "export default function AdminContentPage() {\n  const { features, stats, teamMembers, reviews, addFeature, addStat, addTeamMember, addReview } = useAdmin();\n  ...\n  return (...)",
+      "explanation": "AdminContentPage reads from AdminContext and renders immediately. When AdminProvider's useEffect triggers setState, this component re-renders, but the AdminContext is mid-update. This creates a situation where HotReload tries to update AdminProvider while AdminContentPage is rendering."
+    },
+    {
+      "file": "components/admin/MenuTable.tsx",
+      "line": 211,
+      "type": "state-update-during-context-read",
+      "severity": "critical",
+      "code_snippet": "export default function MenuTable() {\n  const { adminMenuItems, updateMenuItem, deleteMenuItem } = useAdmin();",
+      "explanation": "MenuTable reads adminMenuItems from AdminContext. During the initial data load in AdminProvider's useEffect, multiple setState calls are queued. MenuTable renders with stale/empty data, then when state updates hit, the parent (AdminProvider) triggers a re-render of MenuTable while HotReload is trying to hot-reload the component."
+    },
+    {
+      "file": "components/About.tsx",
+      "line": 15,
+      "type": "state-update-during-context-read",
+      "severity": "critical",
+      "code_snippet": "export default function About() {\n  const { teamMembers } = useAdmin();",
+      "explanation": "About component reads teamMembers from AdminContext. Same issue as MenuTable - the context read triggers re-renders when AdminProvider batches state updates, causing HotReload warnings."
+    },
+    {
+      "file": "components/MenuSection.tsx",
+      "line": 173,
+      "type": "state-update-during-context-read",
+      "severity": "warning",
+      "code_snippet": "const { adminMenuItems } = useAdmin();\nconst filtered = useMemo(() => {\n  return adminMenuItems.filter(item => {",
+      "explanation": "MenuSection reads from AdminContext and computes derived state (filtered). Not directly causing HotReload warnings but follows same risky pattern."
+    },
+    {
+      "file": "components/admin/MenuTable.tsx",
+      "line": 257,
+      "type": "duplicate-key",
+      "severity": "warning",
+      "code_snippet": "{['Item', 'Category', 'Variants & Prices', 'Tags', 'Rating', ''].map((h, idx) => (\n  <th key={`${h}-${idx}`} className=\"...\">{h}</th>\n))}",
+      "explanation": "Table header keys use `${h}-${idx}`. The empty string header ('') combined with its index creates a valid but fragile key. If headers reorder, keys collide. Better to use unique, stable identifiers."
+    },
+    {
+      "file": "components/About.tsx",
+      "line": 128,
+      "type": "suboptimal-key",
+      "severity": "info",
+      "code_snippet": "achievements.map((a, i) => (\n  <motion.div\n    key={`${a.label}-${i}`}\n    ...\n  >",
+      "explanation": "Key uses `${a.label}-${i}`. While functional, label-based keys can fail if data is reordered or if labels are not globally unique. Array index is never recommended in keys. Use a stable, unique ID if available."
+    },
+    {
+      "file": "components/About.tsx",
+      "line": 108,
+      "type": "suboptimal-key",
+      "severity": "info",
+      "code_snippet": "{[...badges...].map(badge => (\n  <div key={badge.label} ...>",
+      "explanation": "Badge key uses only badge.label. If multiple badges share the same label or labels change, this breaks reactivity. Should be `${badge.label}-${badge.sub}` or a dedicated ID."
+    },
+    {
+      "file": "components/MenuSection.tsx",
+      "line": 261,
+      "type": "suboptimal-key",
+      "severity": "warning",
+      "code_snippet": "{filtered.map((item, i) => (\n  <motion.div\n    key={item.id ?? (item as any)._id ?? (item as any).slug ?? (item as any).code ?? item.name}\n    ...\n  >",
+      "explanation": "Fallback key chain (id -> _id -> slug -> code -> name) is fragile. If none are defined, falls back to item.name which is not unique. Should use a guaranteed unique ID or stable compound key."
+    },
+    {
+      "file": "context/AdminContext.tsx",
+      "line": 159,
+      "type": "async-fire-and-forget",
+      "severity": "warning",
+      "code_snippet": "const toggleCoupon = useCallback(async (id: string) => {\n  setCoupons(prev => {\n    const c = prev.find(x => x.id === id);\n    if (c) fetch(`/api/coupons/${id}`, { method: 'PUT', body: JSON.stringify({ active: !c.active }) });\n    return prev.map(c => c.id === id ? { ...c, active: !c.active } : c);\n  });\n}, []);",
+      "explanation": "Async fetch is called but not awaited inside the setCoupons callback. The callback completes before the fetch result arrives. While not directly causing HotReload warnings, this is poor error handling and can cause race conditions."
+    }
+  ],
+  "total_issues": 10,
+  "root_cause_analysis": "The HotReload warnings ('Cannot update component X while rendering component Y') are caused by a cascade of state updates triggered during AdminProvider initialization:\n\n1. AdminProvider mounts with empty state (adminMenuItems: [], reviews: [], features: [], stats: [], teamMembers: [])\n2. Its useEffect runs immediately and calls async loadData()\n3. loadData() completes and calls multiple setState functions (setAdminMenuItems, setReviews, setFeatures, etc.) simultaneously\n4. These updates propagate to child components (AdminContentPage, MenuTable, About, MenuSection) that consume useAdmin()\n5. When a child component receives the updated context value, it renders with new data\n6. Meanwhile, Next.js HotReload (a Next.js development tool) attempts to hot-reload one of the parent components\n7. React detects this conflict: a parent (HotReload wrapper) is being updated while a child (AdminContentPage/MenuTable/About) is rendering\n8. This violates React's Rule of Rules: you cannot trigger a parent update while a child is in the middle of rendering\n\nThe secondary issues (key warnings) occur because:\n- MenuTable uses index-based compound keys which can collide\n- About.tsx uses non-unique label keys for achievements\n- MenuSection.tsx has fragile fallback key chains that may not resolve to unique values\n\nThese key issues cause duplicate-key warnings when items reorder or when multiple items share the same fallback value."
+}

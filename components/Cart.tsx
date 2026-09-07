@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Plus, Minus, Trash2, ShoppingBag, ArrowRight, Heart } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 import { useAdmin } from '@/context/AdminContext';
+import { useAuth } from '@/context/AuthContext';
 import { CartItem, MenuItem } from '@/types';
 
 interface CartProps {
@@ -14,30 +15,45 @@ interface CartProps {
 }
 
 function CouponApplyUI() {
-  const { appliedCoupon, applyDiscount, clearDiscount } = useCart();
-  const { coupons } = useAdmin();
+  const { appliedCoupon, applyDiscount, clearDiscount, subtotal } = useCart();
 
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const handleApply = () => {
+  const handleApply = async () => {
     const normalized = code.trim().toUpperCase();
     if (!normalized) {
       setError('Enter a coupon code');
       return;
     }
 
-    const coupon = coupons.find(
-      c => c.active && c.code.toUpperCase() === normalized
-    );
+    try {
+      setError(null);
+      const res = await fetch('/api/coupons/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: normalized, subtotal }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        const errMap: Record<string, string> = {
+          COUPON_NOT_FOUND: 'Invalid coupon code',
+          COUPON_INACTIVE: 'This coupon is no longer active',
+          COUPON_EXPIRED: 'This coupon has expired',
+          COUPON_LIMIT_REACHED: 'This coupon has reached its usage limit',
+        };
+        setError(errMap[data.error] || 'Invalid or inactive coupon');
+        return;
+      }
 
-    if (!coupon) {
-      setError('Invalid or inactive coupon');
-      return;
+      const discountPercent = data.coupon.discountType === 'percentage'
+        ? data.coupon.discountValue
+        : 0;
+      applyDiscount({ code: data.coupon.code, discountPercent });
+      setCode('');
+    } catch {
+      setError('Could not validate coupon. Try again.');
     }
-
-    applyDiscount({ code: coupon.code, discountPercent: coupon.discountPercent });
-    setError(null);
   };
 
   return (
@@ -67,6 +83,12 @@ function CouponApplyUI() {
   );
 }
 
+function getDefaultAddressId(customer: any) {
+  return customer?.addresses?.find((address: any) => address.isDefault)?._id
+    ?? customer?.addresses?.[0]?._id
+    ?? null;
+}
+
 export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps) {
   const {
     items,
@@ -81,10 +103,11 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
     toggleWishlist,
     clearDiscount,
   } = useCart();
-  const { adminMenuItems, addOrder } = useAdmin();
+  const { adminMenuItems } = useAdmin();
+  const { customer } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'cart' | 'wishlist'>('cart');
-  const [orderToken, setOrderToken] = useState<{ token: number; id: string } | null>(null);
+  const [orderToken, setOrderToken] = useState<{ id: string; total: number; eta: string } | null>(null);
 
   // Sync active tab when cart opens
   useEffect(() => {
@@ -113,35 +136,54 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
     return Math.floor(Math.random() * 2000) + 1; // 1..2000
   };
 
-  const handleCheckout = () => {
+  const handleCheckout = async () => {
     if (items.length === 0) {
       alert('Your cart is empty!');
       return;
     }
 
-    const token = generateToken();
-    const order = {
-      id: `order-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      token,
-      customer: 'Guest Customer',
-      avatar: '👤',
-      items: items.map((item: CartItem) => ({
-        name: `${item.menuItemName} (${item.variantName})`,
-        qty: item.quantity,
-        price: item.variantPrice,
-      })),
-      total,
-      status: 'Pending' as const,
-      createdAt: new Date().toISOString(),
-      time: new Date().toLocaleTimeString(),
-      address: '123 Main Street',
-    };
+    const deliveryAddressId = getDefaultAddressId(customer);
+    if (!deliveryAddressId) {
+      alert('Please add a delivery address before checking out.');
+      return;
+    }
 
-    addOrder(order);
-    clearCart();
-    clearDiscount();
-    setOrderToken({ token, id: order.id });
-    setActiveTab('cart');
+    try {
+      const res = await fetch('/api/user/orders', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Idempotency-Key': crypto.randomUUID(),
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          items: items.map((item: CartItem) => ({
+            menuItemId: item.menuItemId,
+            variantId: item.variantId,
+            quantity: item.quantity,
+          })),
+          deliveryAddressId,
+          paymentMethod: 'cash',
+          couponCode: appliedCoupon?.code,
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || 'Checkout failed');
+      }
+
+      clearCart();
+      clearDiscount();
+      setOrderToken({
+        id: data.orderId,
+        total: data.totalAmount,
+        eta: data.estimatedDeliveryTime,
+      });
+      setActiveTab('cart');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Checkout failed');
+    }
   };
 
   return (
@@ -183,13 +225,17 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
 
               <div className="bg-gradient-to-r from-[#FF4500] to-[#FFD700] rounded-2xl p-6 mb-6">
                 <p className="text-xs text-white/70 font-semibold mb-2 uppercase">Your Token Number</p>
-                <p className="text-4xl font-black text-white tracking-widest font-mono">{orderToken.token}</p>
+                <p className="text-2xl font-black text-white tracking-wide font-mono">{orderToken.id.slice(-8)}</p>
               </div>
 
               <div className="space-y-2 mb-6 text-left bg-white/5 rounded-xl p-4 border border-white/10">
                 <div className="flex justify-between text-xs">
                   <span className="text-gray-400">Order ID:</span>
                   <span className="text-white font-mono text-[10px]">{orderToken.id}</span>
+                </div>
+                <div className="flex justify-between text-xs pt-2 border-t border-white/10">
+                  <span className="text-gray-400">Total:</span>
+                  <span className="text-white font-semibold">₹{orderToken.total.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-xs pt-2 border-t border-white/10">
                   <span className="text-gray-400">Status:</span>
@@ -208,8 +254,8 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
               </button>
 
               <p className="text-[10px] text-gray-500 mt-4">
-                📱 Track your order using the token number above<br />
-                🕐 Estimated delivery: 30 minutes
+                📱 Track your order in My Orders<br />
+                🕐 Estimated delivery: {new Date(orderToken.eta).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </p>
             </div>
           </motion.div>

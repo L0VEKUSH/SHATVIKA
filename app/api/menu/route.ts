@@ -2,10 +2,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectToMongo } from '@/lib/mongoose';
 import { MenuItem } from '@/models/MenuItem';
 import { isAdminJwtAuthed } from '@/lib/adminJwt';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // Rate limiting: 30 requests per minute per IP (generous for menu fetches)
+  const clientIp = getClientIp(req);
+  const rateCheck = checkRateLimit(clientIp, 30, 60 * 1000);
+  if (!rateCheck.allowed) {
+    return NextResponse.json(
+      { error: 'RATE_LIMITED', retryAfter: rateCheck.retryAfter },
+      { status: 429, headers: { 'Retry-After': String(rateCheck.retryAfter) } }
+    );
+  }
+
   try {
     await connectToMongo();
     const items = await MenuItem.find().sort({ createdAt: -1 }).lean();

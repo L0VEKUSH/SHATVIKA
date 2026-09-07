@@ -4,19 +4,28 @@ export type ReviewStatus = 'pending' | 'approved' | 'rejected';
 
 const reviewSchema = new Schema(
   {
+    title: { type: String, trim: true, maxlength: 100 },
     name: { type: String, required: true, trim: true, maxlength: 80 },
     rating: { type: Number, required: true, min: 1, max: 5 },
-
-    // Overall experience text (when menuItemId is null)
     text: { type: String, trim: true, maxlength: 1000 },
 
-    imageUrl: { type: String, required: false },
+    // Image URLs - imageUrl is the primary single image for backward compatibility
+    imageUrl: { type: String, default: null },
+    mediaUrls: [{ type: String }], // Array of image/video URLs
+
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', default: null },
+
+    isAnonymous: { type: Boolean, default: false },
+    verifiedPurchase: { type: Boolean, default: false },
+    helpfulCount: { type: Number, default: 0 },
+    helpfulVoters: [{ type: String }],
 
     // Private (never render publicly)
-    email: { type: String, required: false, trim: true, maxlength: 120 },
+    email: { type: String, trim: true, maxlength: 120, index: true },
 
     // null means overall experience
-    menuItemId: { type: String, required: false, default: null },
+    menuItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'MenuItem', default: null },
 
     status: {
       type: String,
@@ -25,13 +34,17 @@ const reviewSchema = new Schema(
       default: 'pending',
       index: true,
     },
+
+    // Admin reply fields
+    replyBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin', default: null },
+    replyText: { type: String, default: null, trim: true },
+    replyDate: { type: Date, default: null },
   },
   { timestamps: true }
 );
 
 reviewSchema.set('toJSON', {
   transform: (_doc, ret) => {
-    // ret._id exists at runtime but mongoose's typings can be strict.
     const anyRet = ret as any;
     if (anyRet._id) anyRet.id = anyRet._id.toString();
     delete anyRet._id;
@@ -39,9 +52,11 @@ reviewSchema.set('toJSON', {
   },
 });
 
+// Indexes for common review queries
+reviewSchema.index({ menuItemId: 1, status: 1 });
+reviewSchema.index({ userId: 1 });
+reviewSchema.index({ orderId: 1 });
 
 // Keep model typing simple to avoid mongoose type duplication issues.
 export const Review: Model<any> =
   (mongoose.models.Review as Model<any> | undefined) ?? mongoose.model('Review', reviewSchema);
-
-

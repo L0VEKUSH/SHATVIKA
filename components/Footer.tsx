@@ -3,7 +3,7 @@
 import { useState, FormEvent } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Instagram, Twitter, Youtube, Facebook,
+  Instagram,
   ArrowRight, MapPin, Phone, Mail,
 } from 'lucide-react';
 
@@ -17,11 +17,11 @@ const QUICK_LINKS = [
 ];
 
 const MENU_LINKS = [
+  { label: 'Momos 🥟',       href: '#menu' },
   { label: 'Burgers 🍔',     href: '#menu' },
+  { label: 'South Indian 🥞',href: '#menu' },
   { label: 'Sandwiches 🥪',  href: '#menu' },
-  { label: 'Fries 🍟',       href: '#menu' },
-  { label: 'Drinks 🥤',      href: '#menu' },
-  { label: 'Desserts 🍰',    href: '#menu' },
+  { label: 'Shakes 🥤',      href: '#menu' },
 ];
 
 const SOCIAL = [

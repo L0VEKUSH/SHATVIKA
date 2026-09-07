@@ -1,8 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Poppins, Inter } from 'next/font/google';
 import './globals.css';
-import { CartProvider } from '@/context/CartContext';
-import { AdminProvider } from '@/context/AdminContext';
+import { Providers } from '@/app/providers';
 import { JsonLd } from '@/components/JsonLd';
 
 const poppins = Poppins({
@@ -57,6 +56,11 @@ export const metadata: Metadata = {
   alternates: {
     canonical: siteUrl,
   },
+  manifest: '/manifest.json',
+  icons: {
+    icon: '/icon-192.png',
+    apple: '/icon-192.png',
+  },
 };
 
 export const viewport: Viewport = {
@@ -76,12 +80,10 @@ export default function RootLayout({
         <a href="#main-content" className="skip-link">
           Skip to main content
         </a>
-        <CartProvider>
-          <AdminProvider>
-            <JsonLd />
-            {children}
-          </AdminProvider>
-        </CartProvider>
+        <Providers>
+          <JsonLd />
+          {children}
+        </Providers>
       </body>
     </html>
   );

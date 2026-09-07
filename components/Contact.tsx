@@ -85,15 +85,38 @@ function Field({
 
 /* ── Main component ────────────────────────────────── */
 export default function Contact() {
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success'>('idle');
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [errorMsg, setErrorMsg] = useState('');
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setStatus('loading');
-    await new Promise(r => setTimeout(r, 1500));
-    setStatus('success');
-    (e.target as HTMLFormElement).reset();
-    setTimeout(() => setStatus('idle'), 4000);
+    setErrorMsg('');
+
+    const form = e.currentTarget;
+    const data = new FormData(form);
+
+    try {
+      const res = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: data.get('name'),
+          email: data.get('email'),
+          phone: data.get('phone') || '',
+          message: data.get('message'),
+        }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.error || 'Failed to send message');
+      setStatus('success');
+      form.reset();
+      setTimeout(() => setStatus('idle'), 4000);
+    } catch (err) {
+      setStatus('error');
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to send message');
+      setTimeout(() => setStatus('idle'), 4000);
+    }
   };
 
   return (
@@ -140,6 +163,10 @@ export default function Contact() {
             className="glass rounded-3xl p-8 border border-white/8"
           >
             <h3 className="text-xl font-black text-white mb-6">Send a Message</h3>
+
+            {status === 'error' && errorMsg && (
+              <p className="text-sm text-red-400 mb-4">{errorMsg}</p>
+            )}
 
             {status === 'success' ? (
               <motion.div
@@ -278,16 +305,15 @@ export default function Contact() {
               </div>
             </div>
 
-            {/* Map placeholder */}
-            <div
-              className="rounded-2xl overflow-hidden border border-white/8 relative h-[160px] flex items-center justify-center"
-              style={{ background: 'linear-gradient(135deg, #0f0f0f, #1a0800)' }}
-            >
-              <div className="flex flex-col items-center gap-2 text-center">
-                <span className="text-3xl">📍</span>
-                <p className="text-white font-bold text-sm">Quarshi Chauraha, Aligarh</p>
-                <p className="text-gray-600 text-xs"> </p>
-              </div>
+            {/* Map */}
+            <div className="rounded-2xl overflow-hidden border border-white/8 relative h-[160px]">
+              <iframe
+                title="SHATVIKA CORNER location"
+                src="https://maps.google.com/maps?q=Quarshi+Chauraha+Aligarh&output=embed"
+                className="w-full h-full border-0 grayscale opacity-80 hover:opacity-100 transition-opacity"
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+              />
             </div>
           </motion.div>
         </div>

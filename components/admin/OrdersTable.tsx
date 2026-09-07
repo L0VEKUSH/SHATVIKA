@@ -111,7 +111,33 @@ function OrderRow({ order }: { order: Order }) {
                 exit={{ opacity: 0, height: 0 }}
                 className="bg-white/3 rounded-xl p-4 border border-white/8"
               >
-                <p className="text-xs text-gray-500 mb-2">📍 {order.address}</p>
+                <div className="flex flex-col sm:flex-row gap-6 mb-4">
+                  <div className="flex-1">
+                    <p className="text-xs text-gray-500 mb-1">Customer Info</p>
+                    <p className="text-sm font-semibold text-white">{order.customer}</p>
+                    <p className="text-xs text-gray-400">{order.email}</p>
+                    <p className="text-xs text-gray-400">📞 {order.phone}</p>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xs text-gray-500 mb-1">Delivery Address</p>
+                    <p className="text-sm text-gray-300">📍 {order.address}</p>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xs text-gray-500 mb-1">Payment Status</p>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 uppercase tracking-wider text-white">
+                      {order.paymentStatus}
+                    </span>
+                  </div>
+                </div>
+
+                {order.specialInstructions && (
+                  <div className="mb-4 bg-yellow-500/10 border border-yellow-500/20 p-2 rounded-lg">
+                    <p className="text-xs text-yellow-500 font-bold mb-1">Special Instructions:</p>
+                    <p className="text-xs text-yellow-200">{order.specialInstructions}</p>
+                  </div>
+                )}
+
+                <p className="text-xs text-gray-500 mb-2 border-t border-white/10 pt-4">Order Items</p>
                 <div className="space-y-1">
                   {order.items.map((item, i) => (
                     <div
@@ -135,40 +161,6 @@ function OrderRow({ order }: { order: Order }) {
 export default function OrdersTable({ limit }: { limit?: number }) {
   const { orders } = useAdmin();
   const [filter, setFilter] = useState<OrderStatus | 'All'>('All');
-
-  const [tokenInput, setTokenInput] = useState<string>('');
-  const [tokenLoading, setTokenLoading] = useState(false);
-  const [tokenError, setTokenError] = useState<string | null>(null);
-  const [tokenOrder, setTokenOrder] = useState<Order | null>(null);
-
-  const fetchByToken = async () => {
-    setTokenError(null);
-    setTokenOrder(null);
-
-    const token = Number(tokenInput);
-    if (!Number.isFinite(token)) {
-      setTokenError('Please enter a valid numeric token');
-      return;
-    }
-
-    setTokenLoading(true);
-    try {
-      const res = await fetch(`/api/orders/by-token?token=${encodeURIComponent(String(token))}`);
-      const body = await res.json().catch(() => null);
-
-      if (!res.ok) {
-        setTokenError(body?.error ?? `HTTP_${res.status}`);
-        return;
-      }
-
-      setTokenOrder(body as Order);
-    } catch {
-      setTokenError('Failed to fetch order');
-    } finally {
-      setTokenLoading(false);
-    }
-  };
-
 
   const filtered = orders
     .filter(o => filter === 'All' || o.status === filter)

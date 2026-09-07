@@ -21,14 +21,13 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => null);
-    if (!body || !body.token || !Array.isArray(body.items) || body.items.length === 0) {
-      return NextResponse.json({ error: 'token and items are required' }, { status: 400 });
-    }
+    const isAuthed = await isAdminJwtAuthed();
+    if (!isAuthed) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    await connectToMongo();
-    const newOrder = await Order.create(body);
-    return NextResponse.json(newOrder, { status: 201 });
+    return NextResponse.json(
+      { error: 'Use /api/user/orders for customer checkout' },
+      { status: 405 }
+    );
   } catch (err) {
     console.error('[POST /api/orders]', err);
     return NextResponse.json({ error: 'Failed to create order' }, { status: 500 });

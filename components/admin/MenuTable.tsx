@@ -6,11 +6,11 @@ import { Search, Plus, Trash2, Edit3, Check, X, PlusCircle } from 'lucide-react'
 import { useAdmin } from '@/context/AdminContext';
 import { Category, MenuItem, Variant } from '@/types';
 
-const CATEGORIES: Category[] = ['Burgers', 'Pizza', 'Sandwiches', 'Fries', 'Drinks', 'Desserts'];
+const CATEGORIES: Category[] = ['Momos', 'Fries', 'Burgers', 'Patties', 'Sandwiches', 'South Indian', 'Shakes', 'Drinks', 'Desserts', 'Pizza'];
 
 const GRAD_OPTIONS = [
   { label: 'Burger',   cls: 'grad-burger'   },
-  { label: 'Pizza',    cls: 'grad-pizza'     },
+  { label: 'Momos',    cls: 'grad-momos'    },
   { label: 'Sandwich', cls: 'grad-sandwich'  },
   { label: 'Fries',    cls: 'grad-fries'     },
   { label: 'Drinks',   cls: 'grad-drinks'    },
@@ -43,10 +43,11 @@ function VariantsCell({ item }: { item: MenuItem }) {
   };
 
   const addVariant = () => {
-    setVariants([...variants, { id: `v-${Date.now()}`, name: 'New Variant', price: 0, available: true }]);
+    setVariants([...variants, { id: `v-${crypto.randomUUID()}`, name: 'New Variant', price: 0, available: true }]);
   };
 
-  const updateVariant = (id: string, key: keyof Variant, val: any) => {
+
+  const updateVariant = (id: string, key: keyof Variant, val: string | number | boolean) => {
     setVariants(prev => prev.map(v => v.id === id ? { ...v, [key]: val } : v));
   };
 
@@ -108,15 +109,14 @@ function AddItemModal({ onClose }: { onClose: () => void }) {
     emoji: '🍔', gradientClass: 'grad-burger',
     popular: false, spicy: false, vegetarian: false, isNew: true,
   });
-  
   const [variants, setVariants] = useState<Variant[]>([
-    { id: `v-${Date.now()}`, name: 'Regular', price: 99, available: true }
+    { id: `v-${crypto.randomUUID()}`, name: 'Regular', price: 99, available: true }
   ]);
 
   const submit = () => {
     if (!form.name || variants.length === 0) return;
     const item: MenuItem = {
-      id: `custom-${Date.now()}`,
+      id: `custom-${crypto.randomUUID()}`,
       ...form,
       variants,
       rating: 4.5,
@@ -126,7 +126,9 @@ function AddItemModal({ onClose }: { onClose: () => void }) {
     onClose();
   };
 
-  const updateVariant = (id: string, key: keyof Variant, val: any) => {
+
+
+  const updateVariant = (id: string, key: keyof Variant, val: string | number | boolean) => {
     setVariants(prev => prev.map(v => v.id === id ? { ...v, [key]: val } : v));
   };
 
@@ -157,10 +159,10 @@ function AddItemModal({ onClose }: { onClose: () => void }) {
               <div key={v.id} className="flex items-center gap-2 mb-2">
                 <input value={v.name} onChange={e => updateVariant(v.id, 'name', e.target.value)} placeholder="Name" className="input-flame text-xs flex-1" />
                 <input type="number" value={v.price} onChange={e => updateVariant(v.id, 'price', parseFloat(e.target.value) || 0)} placeholder="Price" className="input-flame text-xs w-24" />
-                <button onClick={() => setVariants(vs => vs.filter(x => x.id !== v.id))} className="text-red-400 p-2"><Trash2 className="w-4 h-4"/></button>
+                <button onClick={() => setVariants(prev => prev.filter(x => x.id !== v.id))} className="text-xs text-red-400 font-bold px-1">✕</button>
               </div>
             ))}
-            <button onClick={() => setVariants([...variants, { id: `v-${Date.now()}`, name: 'New', price: 0, available: true }])} className="text-xs text-[#FF8C00] font-bold">+ Add Variant</button>
+            <button onClick={() => setVariants([...variants, { id: `v-${Date.now()}`, name: 'New', price: 0, available: true }])} className="text-xs text-[#FF8C00] font-bold mt-1">+ Add Variant</button>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -208,7 +210,7 @@ function AddItemModal({ onClose }: { onClose: () => void }) {
 
 /* ── Main table ── */
 export default function MenuTable() {
-  const { adminMenuItems, updateMenuItem, deleteMenuItem } = useAdmin();
+  const { isLoading, adminMenuItems, updateMenuItem, deleteMenuItem } = useAdmin();
   const [search, setSearch] = useState('');
   const [catFilter, setCatFilter] = useState<Category | 'All'>('All');
   const [showAdd, setShowAdd] = useState(false);
@@ -218,6 +220,37 @@ export default function MenuTable() {
     const matchCat = catFilter === 'All' || item.category === catFilter;
     return matchQ && matchCat;
   }), [adminMenuItems, search, catFilter]);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-4">
+        <div className="h-10 bg-white/10 rounded-xl animate-pulse" />
+        <div className="overflow-x-auto rounded-2xl border border-white/8">
+          <table className="w-full">
+            <thead className="bg-white/3">
+              <tr>
+                {['Item', 'Category', 'Variants & Prices', 'Tags', 'Rating', ''].map((h, idx) => (
+                  <th key={h || `col-${idx}`} className="px-4 py-3 text-left text-[10px] uppercase tracking-wider text-gray-600 font-semibold">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {[...Array(3)].map((_, i) => (
+                <tr key={`skeleton-${i}`} className="border-t border-white/5">
+                  <td className="px-4 py-3"><div className="h-4 bg-white/10 rounded w-24 animate-pulse" /></td>
+                  <td className="px-4 py-3"><div className="h-4 bg-white/10 rounded w-16 animate-pulse" /></td>
+                  <td className="px-4 py-3"><div className="h-4 bg-white/10 rounded w-32 animate-pulse" /></td>
+                  <td className="px-4 py-3"><div className="h-4 bg-white/10 rounded w-20 animate-pulse" /></td>
+                  <td className="px-4 py-3"><div className="h-4 bg-white/10 rounded w-12 animate-pulse" /></td>
+                  <td className="px-4 py-3"><div className="h-4 bg-white/10 rounded w-16 animate-pulse" /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -255,7 +288,7 @@ export default function MenuTable() {
           <thead className="bg-white/3">
             <tr>
               {['Item', 'Category', 'Variants & Prices', 'Tags', 'Rating', ''].map((h, idx) => (
-                <th key={`${h}-${idx}`} className="px-4 py-3 text-left text-[10px] uppercase tracking-wider text-gray-600 font-semibold">{h}</th>
+                <th key={h || `col-${idx}`} className="px-4 py-3 text-left text-[10px] uppercase tracking-wider text-gray-600 font-semibold">{h}</th>
               ))}
             </tr>
           </thead>

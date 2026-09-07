@@ -111,11 +111,17 @@ export async function verifyAdminToken(token: string): Promise<boolean> {
   const { valid, payload } = await verifyHS256(token);
   if (!valid || !payload) return false;
 
-  const fingerprintNow = await digestSha256Hex(
-    `${process.env.ADMIN_EMAIL ?? ''}:${process.env.ADMIN_PASSWORD ?? ''}`
-  );
+  // Check that fingerprint exists and is non-empty.
+  if (typeof payload.fp !== 'string' || payload.fp.length === 0) return false;
 
-  return payload.fp === fingerprintNow;
+  // Check that adminId exists and is non-empty.
+  const adminId = payload.aid;
+  if (typeof adminId !== 'string' || adminId.length === 0) return false;
+
+  // Edge runtime can't access MongoDB, so we only validate token structure here.
+  // Full admin existence check happens in Node.js verifyAdminToken in lib/adminJwt.ts
+  // This is sufficient for middleware to allow requests through to Node handlers.
+  return true;
 }
 
 // Exported for possible future use; Edge runtime can’t set cookies without next/headers.

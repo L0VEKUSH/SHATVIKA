@@ -9,7 +9,10 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "bcrypt": "^6.0.0",
+    "dotenv": "^17.4.2",
     "framer-motion": "^11.11.17",
+    "isomorphic-dompurify": "^3.19.0",
     "lucide-react": "^0.454.0",
     "mongoose": "^9.7.4",
     "next": "15.0.3",

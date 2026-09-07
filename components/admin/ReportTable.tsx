@@ -179,7 +179,7 @@ export default function ReportTable({
           <h3 className="text-white font-bold text-sm">{headerLabel}</h3>
           <p className="text-gray-500 text-xs mt-0.5">Selling & estimated profit from Delivered orders</p>
         </div>
-        <div className="text-[10px] text-gray-600 font-semibold">Profit shown as estimated (demo)</div>
+        <div className="text-[10px] text-gray-600 font-semibold">Profit shown as estimated</div>
       </div>
 
       <div className="overflow-x-auto">

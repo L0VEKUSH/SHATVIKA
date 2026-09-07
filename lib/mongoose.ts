@@ -34,7 +34,6 @@ export async function connectToMongo(): Promise<typeof mongoose> {
   const dbName = process.env.MONGODB_DB ?? 'SHATVIKA';
 
   // Helpful, but do NOT log secrets.
-  console.log(`[mongoose] Using dbName=${dbName} uriConfigured=${Boolean(uri)}`);
 
   // ── 2. Return cached connection ──────────────────────────────
   if (cache.conn) return cache.conn;
@@ -49,7 +48,7 @@ export async function connectToMongo(): Promise<typeof mongoose> {
         socketTimeoutMS: 45_000,
       })
       .then((m) => {
-        console.log(`[mongoose] Connected → db: ${dbName}`);
+        // Don't log on every request — connection status logged once on connect
         cache.conn = m;
         return m;
       })

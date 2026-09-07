@@ -1,8 +1,15 @@
 import { NextResponse } from 'next/server';
+import bcrypt from 'bcrypt';
 
-import { setAdminSession } from '@/lib/adminAuth';
+import { connectToMongo } from '@/lib/mongoose';
+import { Admin } from '@/models/Admin';
+import { setAdminSessionForAdmin } from '@/lib/adminAuth';
 
 export const dynamic = 'force-dynamic';
+
+function normalizeEmail(email: unknown) {
+  return String(email ?? '').trim().toLowerCase();
+}
 
 function requireNonEmpty(value: unknown) {
   const s = String(value ?? '').trim();
@@ -19,10 +26,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, message: 'email and password are required' }, { status: 400 });
     }
 
-    // DB-less admin signup.
-    // This codebase currently does NOT persist new admin credentials to a DB.
-    // Instead, it issues the admin JWT cookie only if a one-time setup key is provided.
-    // This avoids depending on MongoDB while keeping the app deployable.
+    // Keep signup protected: require ADMIN_SETUP_KEY.
+    // (You can remove this later if you want fully open admin self-signup.)
     const setupKeyProvided = String(body?.setupKey ?? '');
     const ADMIN_SETUP_KEY = process.env.ADMIN_SETUP_KEY ?? '';
 
@@ -34,25 +39,27 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, message: 'Invalid setup key' }, { status: 401 });
     }
 
-    // Create admin session cookie.
-    // NOTE: Existing JWT verification also checks a fingerprint derived from env ADMIN_EMAIL/ADMIN_PASSWORD.
-    // So if those env vars are not set, the issued token won't authenticate.
-    // To keep signup "without DB" functional, we mint a session only when those env vars already exist.
-    // If you want truly env-less signup, we must also adjust adminJwt.ts verification logic.
-    const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? '';
-    const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? '';
-    if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
-      return NextResponse.json(
-        {
-          ok: false,
-          message: 'Admin login is env-based. Set ADMIN_EMAIL and ADMIN_PASSWORD in .env.local (signup UI is DB-less only).',
-        },
-        { status: 500 }
-      );
+    await connectToMongo();
+
+    const normalized = normalizeEmail(email);
+
+    const existing = await Admin.findOne({ email: normalized }).lean();
+    if (existing) {
+      return NextResponse.json({ ok: false, message: 'Email already exists' }, { status: 409 });
     }
 
-    // If you reach here, we treat signup request as setting up the session (not persisting credentials).
-    await setAdminSession();
+    const saltRounds = 10;
+    const passwordHash = await bcrypt.hash(password, saltRounds);
+
+    const created = await Admin.create({ email: normalized, password: passwordHash, passwordVersion: 0 });
+
+    // Fetch the full admin document for fingerprint generation
+    const adminDoc = await Admin.findById(created._id).lean();
+    if (!adminDoc) {
+      return NextResponse.json({ ok: false, message: 'Failed to retrieve created admin' }, { status: 500 });
+    }
+
+    await setAdminSessionForAdmin(String(created._id), adminDoc);
 
     return NextResponse.json({ ok: true });
   } catch (err) {
@@ -60,4 +67,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, message: 'Invalid request' }, { status: 400 });
   }
 }
+
 

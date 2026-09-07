@@ -48,10 +48,28 @@ teamMemberSchema.set('toJSON', toJSON);
 /* ── GalleryItem ─────────────────────────────────────────────── */
 const galleryItemSchema = new Schema(
   {
-    label:    { type: String, required: true },
-    emoji:    { type: String, required: true },
-    gradient: { type: String, required: true },
-    tall:     { type: Boolean, default: false },
+    title: { type: String, required: true, trim: true, minlength: 1, maxlength: 120 },
+    description: { type: String, trim: true, maxlength: 500, default: '' },
+    category: {
+      type: String,
+      enum: ['Food', 'Restaurant', 'Team', 'Events'],
+      default: 'Food',
+      index: true,
+    },
+    imageUrl: { type: String, required: true, trim: true },
+    imageType: {
+      type: String,
+      enum: ['image', 'video', 'youtube'],
+      default: 'image',
+    },
+    youtubeId: { type: String, trim: true, default: null },
+    featured: { type: Boolean, default: false, index: true },
+    order: { type: Number, default: 0, index: true },
+    // Legacy fields for backward compatibility
+    label: { type: String, default: '' },
+    emoji: { type: String, default: '' },
+    gradient: { type: String, default: '' },
+    tall: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

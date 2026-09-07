@@ -1,24 +1,28 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Heart, Plus, Star, Flame, Leaf, Zap } from 'lucide-react';
+import { Search, Heart, Plus, Star } from 'lucide-react';
 import { Category, MenuItem } from '@/types';
 import { useCart } from '@/context/CartContext';
 import { useAdmin } from '@/context/AdminContext';
 
 const CATEGORIES: Category[] = [
-  'All', 'Burgers', 'Pizza', 'Sandwiches', 'Fries', 'Drinks', 'Desserts',
+  'All', 'Momos', 'Fries', 'Burgers', 'Patties', 'Sandwiches', 'South Indian', 'Shakes', 'Drinks', 'Desserts', 'Pizza'
 ];
 
 const CATEGORY_EMOJIS: Record<Category, string> = {
   All:        '🍽️',
-  Burgers:    '🍔',
-  Pizza:      '🍕',
-  Sandwiches: '🥪',
+  Momos:      '🥟',
   Fries:      '🍟',
+  Burgers:    '🍔',
+  Patties:    '🥠',
+  Sandwiches: '🥪',
+  'South Indian': '🥞',
+  Shakes:     '🥤',
   Drinks:     '🥤',
   Desserts:   '🍰',
+  Pizza:      '🍕'
 };
 
 /* ── Star renderer ─────────────────────────────────── */
@@ -50,8 +54,8 @@ function FoodCard({ item }: { item: MenuItem }) {
     setTimeout(() => setAdded(false), 1400);
   };
 
-  const selectedVariant = item.variants.find(v => v.id === selectedVariantId) || item.variants[0];
-  const price = selectedVariant?.price || 0;
+  const selectedVariant = item.variants?.find(v => v.id === selectedVariantId) || item.variants?.[0];
+  const price = selectedVariant?.price || item.basePrice || 0;
 
   return (
     <motion.div
@@ -108,17 +112,11 @@ function FoodCard({ item }: { item: MenuItem }) {
           </span>
         </div>
 
-        {item.variants.length > 1 && (
+        {(item.variants?.length || 0) > 0 && (
           <div className="flex flex-wrap gap-2 mt-2">
             {item.variants.map((variant) => (
               <button
-                key={
-                  variant.id ??
-                  (variant as any)._id ??
-                  (variant as any).slug ??
-                  (variant as any).code ??
-                  variant.name
-                }
+                key={variant.id ?? variant.name}
                 onClick={() => setSelectedVariantId(variant.id)}
                 className={`text-[10px] px-3 py-1.5 rounded-full border transition-all duration-200 transform-gpu hover:scale-[1.03] ${
                   selectedVariantId === variant.id
@@ -135,7 +133,7 @@ function FoodCard({ item }: { item: MenuItem }) {
         <div className="flex items-center justify-between mt-auto pt-2 border-t border-white/5">
           <div className="flex-1 min-w-0">
             <p className="text-sm font-bold text-white truncate">{item.name}</p>
-            <p className="flame-text text-sm font-black mt-0.5">₹{(selectedVariant?.price || 0).toFixed(2)}</p>
+            <p className="flame-text text-sm font-black mt-0.5">₹{price.toFixed(2)}</p>
           </div>
 
           <button
@@ -166,7 +164,18 @@ function FoodCard({ item }: { item: MenuItem }) {
 export default function MenuSection() {
   const [activeCategory, setActiveCategory] = useState<Category>('All');
   const [searchQuery,    setSearchQuery]    = useState('');
-  const { adminMenuItems } = useAdmin();
+  const { isLoading, adminMenuItems } = useAdmin();
+
+  /* Listen for header search events */
+  useEffect(() => {
+    const handleMenuSearch = (e: CustomEvent<string>) => {
+      if (typeof e.detail === 'string') {
+        setSearchQuery(e.detail);
+      }
+    };
+    window.addEventListener('menu-search', handleMenuSearch as EventListener);
+    return () => window.removeEventListener('menu-search', handleMenuSearch as EventListener);
+  }, []);
 
   const filtered = useMemo(() => {
     return adminMenuItems.filter(item => {
@@ -176,6 +185,26 @@ export default function MenuSection() {
       return matchCat && matchSearch;
     });
   }, [activeCategory, searchQuery, adminMenuItems]);
+
+  // Show loading skeleton while data loads
+  if (isLoading) {
+    return (
+      <section className="section-pad bg-[#0a0a0a]">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center mb-12 space-y-4 animate-pulse">
+            <div className="h-4 bg-white/10 rounded w-32 mx-auto" />
+            <div className="h-10 bg-white/10 rounded w-64 mx-auto" />
+            <div className="h-3 bg-white/10 rounded w-96 mx-auto" />
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+            {[...Array(8)].map((_, i) => (
+              <div key={i} className="h-48 bg-white/5 rounded-2xl animate-pulse" />
+            ))}
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="section-pad bg-[#0a0a0a]">
@@ -213,7 +242,7 @@ export default function MenuSection() {
             type="search"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search burgers, pizza, fries…"
+            placeholder="Search burgers, momos, fries…"
             className="input-flame pl-11"
           />
         </motion.div>
@@ -256,13 +285,7 @@ export default function MenuSection() {
             >
             {filtered.map((item, i) => (
                 <motion.div
-                  key={
-                    item.id ??
-                    (item as any)._id ??
-                    (item as any).slug ??
-                    (item as any).code ??
-                    item.name
-                  }
+                  key={item.id}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.04 }}

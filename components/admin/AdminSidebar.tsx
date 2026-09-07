@@ -6,13 +6,15 @@ import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, UtensilsCrossed, ShoppingBag,
-  Tag, Menu, X, ChevronRight, FileText,
+  Tag, Menu, X, ChevronRight, FileText, Image, Star,
 } from 'lucide-react';
 
 const NAV = [
   { href: '/admin',         icon: LayoutDashboard,  label: 'Dashboard'   },
   { href: '/admin/content', icon: FileText,         label: 'Content'     },
   { href: '/admin/menu',    icon: UtensilsCrossed,   label: 'Menu'        },
+  { href: '/admin/gallery', icon: Image,             label: 'Gallery'     },
+  { href: '/admin/reviews', icon: Star,              label: 'Reviews'     },
   { href: '/admin/orders',  icon: ShoppingBag,       label: 'Orders'      },
   { href: '/admin/coupons', icon: Tag,               label: 'Coupons'     },
 ];

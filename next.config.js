@@ -4,7 +4,9 @@ const nextConfig = {
     remotePatterns: [
       { protocol: 'https', hostname: 'images.unsplash.com' },
       { protocol: 'https', hostname: 'plus.unsplash.com' },
+      { protocol: 'https', hostname: 'img.youtube.com' },
     ],
+    unoptimized: process.env.NODE_ENV === 'development',
   },
 
   // Ensure server-only modules (mongoose, crypto) are not bundled for the browser

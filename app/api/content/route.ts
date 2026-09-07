@@ -6,14 +6,14 @@ import type { Model } from 'mongoose';
 
 export const dynamic = 'force-dynamic';
 
-const MODELS: Record<string, Model<any>> = {
+const MODELS: Record<string, Model<unknown>> = {
   feature:     Feature,
   stat:        Stat,
   teammember:  TeamMember,
   galleryitem: GalleryItem,
 };
 
-function getModel(type: string | null): Model<any> | null {
+function getModel(type: string | null): Model<unknown> | null {
   if (!type) return null;
   return MODELS[type.toLowerCase()] ?? null;
 }

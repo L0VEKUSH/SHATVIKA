@@ -5,14 +5,40 @@ import { Award, MapPin, Heart, TrendingUp } from 'lucide-react';
 import { useAdmin } from '@/context/AdminContext';
 
 const achievements = [
-  { icon: Award,       label: 'Best Fast Food     ',   sub: '    '      },
-  { icon: Heart,       label: '98% Customer Love',     sub: 'Verified Reviews'        },
-  { icon: MapPin,      label: '    ',          sub: 'Across India & Online'   },
-  { icon: TrendingUp,  label: '300% Growth',           sub: '    '  },
+  { icon: Award,       label: 'Best Fast Food',        sub: 'Local Favorite' },
+  { icon: Heart,       label: '98% Customer Love',     sub: 'Verified Reviews' },
+  { icon: MapPin,      label: 'Locally Sourced',       sub: 'Fresh Ingredients' },
+  { icon: TrendingUp,  label: 'Fast Delivery',         sub: 'Hot & Fresh' },
 ];
 
 export default function About() {
-  const { teamMembers } = useAdmin();
+  const { isLoading, teamMembers, stats, features } = useAdmin();
+  const badgeStats = stats.slice(0, 3);
+  const displayAchievements = features.length >= 4
+    ? features.slice(0, 4).map(f => ({ icon: Award, label: f.title, sub: f.description.slice(0, 40) }))
+    : achievements;
+
+  if (isLoading) {
+    return (
+      <section className="section-pad bg-[#0a0a0a]">
+        <div className="max-w-7xl mx-auto">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center mb-20">
+            <div className="space-y-4">
+              <div className="h-4 bg-white/10 rounded w-24 animate-pulse" />
+              <div className="h-10 bg-white/10 rounded w-64 animate-pulse" />
+              <div className="h-4 bg-white/10 rounded w-full animate-pulse" />
+            </div>
+            <div className="h-[420px] rounded-3xl bg-white/5 animate-pulse" />
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-20">
+            {[...Array(4)].map((_, i) => (
+              <div key={`achievement-skeleton-${i}`} className="h-24 bg-white/5 rounded-2xl animate-pulse" />
+            ))}
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="section-pad bg-[#0a0a0a]">
@@ -36,8 +62,14 @@ export default function About() {
               for Fire
             </h2>
             <div className="space-y-4 text-gray-400 text-sm md:text-base leading-relaxed">
-              
-              
+              <p>
+                SHATVIKA CORNER started with a simple belief: fast food can be fresh, honest, and made with care.
+                Every dish is prepared to order using quality ingredients and recipes perfected in our kitchen.
+              </p>
+              <p>
+                From flame-grilled burgers to handmade momos, we bring bold flavors and warm hospitality
+                to every plate — delivered hot to your door in Aligarh.
+              </p>
             </div>
 
             {/* Values */}
@@ -96,20 +128,19 @@ export default function About() {
               />
             </div>
 
-            {/* Floating achievement badges */}
-            {[
-              { label: '12+ Years', sub: 'of excellence', pos: 'top-4 left-4' },
-              { label: '50K+ fans', sub: 'and growing',   pos: 'top-4 right-4' },
-              { label: '4.9 ★',    sub: 'average rating', pos: 'bottom-4 right-4' },
-            ].map(badge => (
-              <div
-                key={badge.label}
-                className={`absolute ${badge.pos} glass-dark rounded-xl px-3.5 py-2.5 border border-white/8`}
-              >
-                <p className="flame-text text-sm font-black">{badge.label}</p>
-                <p className="text-gray-500 text-[10px] font-medium">{badge.sub}</p>
-              </div>
-            ))}
+            {/* Floating stat badges from admin */}
+            {badgeStats.length > 0 ? badgeStats.map((badge, i) => {
+              const positions = ['top-4 left-4', 'top-4 right-4', 'bottom-4 right-4'];
+              return (
+                <div
+                  key={badge.id}
+                  className={`absolute ${positions[i] ?? 'bottom-4 left-4'} glass-dark rounded-xl px-3.5 py-2.5 border border-white/8`}
+                >
+                  <p className="flame-text text-sm font-black">{badge.value}</p>
+                  <p className="text-gray-500 text-[10px] font-medium">{badge.label}</p>
+                </div>
+              );
+            }) : null}
           </motion.div>
         </div>
 
@@ -121,9 +152,9 @@ export default function About() {
           viewport={{ once: true }}
           transition={{ delay: 0.1 }}
         >
-          {achievements.map((a, i) => (
-            <motion.div
-              key={a.label}
+{features.length >= 4 ? displayAchievements.map((a, i) => (
+          <motion.div
+              key={`${a.label}-${i}`}
               initial={{ opacity: 0, y: 24 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
@@ -135,9 +166,17 @@ export default function About() {
                 <a.icon className="w-5 h-5 text-[#FF8C00]" />
               </div>
               <p className="text-white font-bold text-sm">{a.label}</p>
-              <p className="text-gray-600 text-xs mt-0.5">{a.sub}</p>
+              <p className="text-gray-600 text-xs mt-0.5 line-clamp-2">{a.sub}</p>
             </motion.div>
-          ))}
+          )) : (
+            <div className="col-span-full glass rounded-3xl border border-white/8 p-10 text-center">
+              <p className="text-4xl mb-3">🏆</p>
+              <h4 className="text-lg font-black text-white mb-2">Our Achievements</h4>
+              <p className="text-gray-400 text-sm max-w-md mx-auto">
+                Highlights will appear here once you add features in the admin content panel.
+              </p>
+            </div>
+          )}
         </motion.div>
 
         {/* ── Team section ──────────────────────────────── */}
@@ -157,7 +196,7 @@ export default function About() {
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {teamMembers.map((member, i) => (
+            {teamMembers.length > 0 ? teamMembers.map((member, i) => (
               <motion.div
                 key={member.id}
                 initial={{ opacity: 0, y: 24 }}
@@ -188,7 +227,15 @@ export default function About() {
                   <p className="text-gray-500 text-xs mt-0.5 font-medium">{member.role}</p>
                 </div>
               </motion.div>
-            ))}
+            )) : (
+              <div className="col-span-full glass rounded-3xl border border-white/8 p-10 text-center">
+                <p className="text-4xl mb-3">👥</p>
+                <h4 className="text-lg font-black text-white mb-2">Meet the Team</h4>
+                <p className="text-gray-400 text-sm max-w-md mx-auto">
+                  Team profiles will appear here once added in the admin content panel.
+                </p>
+              </div>
+            )}
           </div>
         </motion.div>
       </div>

@@ -70,7 +70,7 @@ export default function Navbar({ onCartOpen, darkMode, onDarkModeToggle }: Navba
       {children}
       {!!badge && (
         <motion.span
-          key={badge}
+          key={`badge-${badge}`}
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
           className="absolute -top-1 -right-1 w-[18px] h-[18px] rounded-full
@@ -80,6 +80,7 @@ export default function Navbar({ onCartOpen, darkMode, onDarkModeToggle }: Navba
           {badge > 9 ? '9+' : badge}
         </motion.span>
       )}
+
     </button>
   );
 

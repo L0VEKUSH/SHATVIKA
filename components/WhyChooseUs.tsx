@@ -95,7 +95,17 @@ function FeatureCard({
 
 /* ── Main component ────────────────────────────────── */
 export default function WhyChooseUs() {
-  const { features, stats } = useAdmin();
+  const { features, stats, isLoading } = useAdmin();
+
+  if (isLoading) {
+    return (
+      <section className="section-pad bg-[#0a0a0a]">
+        <div className="max-w-7xl mx-auto text-center">
+          <p className="text-gray-400 text-sm">Loading…</p>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="section-pad bg-[#0a0a0a]">
@@ -121,47 +131,60 @@ export default function WhyChooseUs() {
         </motion.div>
 
         {/* Feature cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-16">
-            {features.map((f, i) => (
-            <FeatureCard
-              key={
-                (f as any).id ??
-                (f as any)._id ??
-                (f as any).slug ??
-                (f as any).code ??
-                (f as any).title ??
-                i
-              }
-              feature={f}
-              index={i}
-            />
-          ))}
-        </div>
+        {features.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-16">
+            {features.map((f: { id?: string; _id?: string; slug?: string; code?: string; title?: string; emoji: string; description: string; gradient: string }, i) => (
+              <FeatureCard
+                key={
+                  f.id ??
+                  f._id ??
+                  f.slug ??
+                  f.code ??
+                  f.title ??
+                  i
+                }
+                feature={f as any}
+                index={i}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="glass rounded-3xl border border-white/8 p-10 text-center mb-16">
+            <p className="text-4xl mb-3">✨</p>
+            <h3 className="text-xl font-black text-white mb-2">Our Promise</h3>
+            <p className="text-gray-400 text-sm max-w-md mx-auto">
+              Highlights about what makes us special will appear here once added in the admin panel.
+            </p>
+          </div>
+        )}
 
         {/* Stats row */}
-        <motion.div
-          className="grid grid-cols-2 md:grid-cols-4 gap-4"
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ delay: 0.2 }}
-        >
+        {stats.length > 0 ? (
+          <motion.div
+            className="grid grid-cols-2 md:grid-cols-4 gap-4"
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ delay: 0.2 }}
+          >
             {stats.map((s) => (
-            <StatBox
-              key={
-                (s as any).id ??
-                (s as any)._id ??
-                (s as any).slug ??
-                (s as any).code ??
-                (s as any).value ??
-                (s as any).label
-              }
-              stat={s}
-            />
-          ))}
-        </motion.div>
+              <StatBox
+                key={
+                  (s as any).id ??
+                  (s as any)._id ??
+                  (s as any).slug ??
+                  (s as any).code ??
+                  (s as any).value ??
+                  (s as any).label
+                }
+                stat={s}
+              />
+            ))}
+          </motion.div>
+        ) : null}
 
-        {/* Trust bar */}
+        {/* Trust bar from features when available */}
+        {features.length >= 3 ? (
         <motion.div
           className="mt-14 flex flex-wrap items-center justify-center gap-6 md:gap-10"
           initial={{ opacity: 0 }}
@@ -169,19 +192,14 @@ export default function WhyChooseUs() {
           viewport={{ once: true }}
           transition={{ delay: 0.4 }}
         >
-          {[
-            { id: 'hygiene', label: 'HACCP Certified', emoji: '✅' },
-            { id: 'awards', label: 'Award Winning', emoji: '🏆' },
-            { id: 'halal', label: 'Halal Options', emoji: '☪️' },
-            { id: 'eco', label: 'Eco Packaging', emoji: '♻️' },
-            { id: 'msg-free', label: 'No MSG', emoji: '🌿' },
-          ].map(t => (
-            <div key={t.id} className="flex items-center gap-2 text-gray-500 text-xs font-medium">
-              <span>{t.emoji}</span>
-              <span>{t.label}</span>
+          {features.slice(0, 5).map(f => (
+            <div key={f.id} className="flex items-center gap-2 text-gray-500 text-xs font-medium">
+              <span>{f.emoji}</span>
+              <span>{f.title}</span>
             </div>
           ))}
         </motion.div>
+        ) : null}
       </div>
     </section>
   );

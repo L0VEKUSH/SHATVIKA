@@ -1,7 +1,9 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowRight, ChevronDown, Star, Clock, Truck } from 'lucide-react';
+import { ArrowRight, ChevronDown, Star } from 'lucide-react';
+import { useAdmin } from '@/context/AdminContext';
 
 interface HeroProps {
   onOrderNow: () => void;
@@ -11,8 +13,8 @@ interface HeroProps {
 const floatingCards = [
   {
     id: 'fc1',
-    emoji: '🍔',
-    name: 'Double Inferno',
+    emoji: '🥟',
+    name: 'Special Momos',
     price: '',
     rating: '',
     top: '18%', left: '5%',
@@ -22,8 +24,8 @@ const floatingCards = [
   
   {
     id: 'fc3',
-    emoji: '🍟',
-    name: 'Loaded Fries',
+    emoji: '🍔',
+    name: 'Special Burger',
     price: '',
     rating: '',
     top: '22%', right: '4%',
@@ -41,6 +43,26 @@ const Badge = ({ icon, text }: { icon: React.ReactNode; text: string }) => (
 );
 
 export default function Hero({ onOrderNow }: HeroProps) {
+  const { stats, adminMenuItems } = useAdmin();
+  const [avgRating, setAvgRating] = useState<number | null>(null);
+
+  useEffect(() => {
+    fetch('/api/reviews?status=approved&menuItemId=null&limit=1')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.avgRating && data.total > 0) setAvgRating(data.avgRating);
+      })
+      .catch(() => {});
+  }, []);
+
+  const heroStats = stats.length > 0
+    ? stats.slice(0, 3).map(s => ({ value: s.value, label: s.label }))
+    : avgRating
+      ? [{ value: `${avgRating}★`, label: 'Average Rating' }]
+      : adminMenuItems.length > 0
+        ? [{ value: `${adminMenuItems.length}+`, label: 'Menu Items' }]
+        : [];
+
   return (
     <section className="relative min-h-screen flex flex-col items-center justify-center
                         overflow-hidden bg-[#0a0a0a] pt-20">
@@ -169,8 +191,8 @@ export default function Hero({ onOrderNow }: HeroProps) {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.65, duration: 0.6 }}
         >
-          Premium flame-grilled burgers, stone-baked pizzas, and handcrafted sides —{' '}
-          <span className="text-white font-medium">crafted with fire, served with love.</span>
+          Premium momos, burgers, south indian specials, and handcrafted shakes —{' '}
+          <span className="text-white font-medium">crafted with pure ingredients, served with love.</span>
         </motion.p>
 
         {/* CTA Buttons */}
@@ -205,23 +227,21 @@ export default function Hero({ onOrderNow }: HeroProps) {
         </motion.div>
 
         {/* Social proof numbers */}
+        {heroStats.length > 0 && (
         <motion.div
           className="flex flex-wrap items-center justify-center gap-8 mt-14"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 1.1, duration: 0.7 }}
         >
-          {[
-            { value: '50K+', label: 'Happy Customers' },
-            { value: '4.9★', label: 'Average Rating' },
-            { value: '<30',  label: 'Min Delivery' },
-          ].map(s => (
+          {heroStats.map(s => (
             <div key={s.label} className="text-center">
               <p className="text-2xl font-black flame-text">{s.value}</p>
               <p className="text-xs text-gray-500 mt-0.5 font-medium">{s.label}</p>
             </div>
           ))}
         </motion.div>
+        )}
       </div>
 
       {/* ── Scroll indicator ──────────────────────────────── */}
