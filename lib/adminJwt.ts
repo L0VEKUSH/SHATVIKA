@@ -1,146 +1,97 @@
-import crypto from 'crypto';
 import { cookies } from 'next/headers';
+import { connectToMongo } from '@/lib/mongoose';
+import { signSessionToken, verifySessionToken, type SessionClaims } from '@/lib/sessionToken';
 import { Admin } from '@/models/Admin';
 
-const COOKIE_NAME = 'admin_session';
+export const ADMIN_COOKIE_NAME = 'admin_session';
+const ADMIN_SESSION_SECONDS = 8 * 60 * 60;
 
-const encoder = new TextEncoder();
+export type AdminSessionState =
+  | { status: 'valid'; accountId: string; claims: SessionClaims; permissions: string[] }
+  | { status: 'invalid' | 'account_disabled' | 'database_unavailable' };
 
-function base64url(input: Buffer | Uint8Array) {
-  return Buffer.from(input)
-    .toString('base64')
-    .replace(/=/g, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_');
+function secret(): string {
+  return process.env.ADMIN_JWT_SECRET ?? '';
 }
 
-function sha256(data: string) {
-  return crypto.createHash('sha256').update(data).digest('hex');
+export function adminSessionConfigurationError(): string | null {
+  const value = secret();
+  if (!value) return 'ADMIN_JWT_SECRET is not configured';
+  if (process.env.NODE_ENV === 'production' && new TextEncoder().encode(value).byteLength < 32) {
+    return 'ADMIN_JWT_SECRET must contain at least 32 bytes in production';
+  }
+  return null;
 }
 
-function getJwtSecret() {
-  const secret = process.env.ADMIN_JWT_SECRET ?? '';
-  return secret;
-}
-
-// Minimal JWT-like implementation (HS256) to avoid extra deps.
-// Token payload is limited to admin id + expiry.
-function signHS256(header: object, payload: object) {
-  const secret = getJwtSecret();
-  if (!secret) throw new Error('ADMIN_JWT_SECRET not configured');
-
-  const headerB64 = base64url(encoder.encode(JSON.stringify(header)));
-  const payloadB64 = base64url(encoder.encode(JSON.stringify(payload)));
-  const data = `${headerB64}.${payloadB64}`;
-
-  const sig = crypto
-    .createHmac('sha256', secret)
-    .update(data)
-    .digest();
-
-  return `${data}.${base64url(sig)}`;
+export async function verifyAdminTokenState(token: string): Promise<AdminSessionState> {
+  const claims = await verifySessionToken({ token, role: 'admin', secret: secret() });
+  if (!claims) return { status: 'invalid' };
+  try {
+    await connectToMongo();
+    const admin = await Admin.findById(claims.sub)
+      .select('+passwordVersion isActive permissions role')
+      .lean();
+    if (!admin || admin.role !== 'admin') return { status: 'invalid' };
+    if (admin.isActive === false) return { status: 'account_disabled' };
+    const currentVersion = admin.passwordVersion ?? 0;
+    if (!Number.isSafeInteger(currentVersion) || currentVersion !== claims.sv) {
+      return { status: 'invalid' };
+    }
+    return {
+      status: 'valid',
+      accountId: claims.sub,
+      claims,
+      permissions: Array.isArray(admin.permissions) ? admin.permissions.map(String) : [],
+    };
+  } catch {
+    return { status: 'database_unavailable' };
+  }
 }
 
 export async function verifyAdminToken(token: string): Promise<boolean> {
-  const { valid, payload } = verifyHS256(token);
-  if (!valid || !payload) return false;
-
-  // Check that fingerprint exists and is non-empty.
-  if (typeof payload.fp !== 'string' || payload.fp.length === 0) return false;
-
-  // Check that adminId exists and is non-empty.
-  const adminId = payload.aid;
-  if (typeof adminId !== 'string' || adminId.length === 0) return false;
-
-  // Verify the admin still exists in MongoDB.
-  try {
-    const admin = await Admin.findById(adminId).lean();
-    if (!admin) return false;
-    return true;
-  } catch {
-    return false;
-  }
+  return (await verifyAdminTokenState(token)).status === 'valid';
 }
 
-
-function verifyHS256(token: string): { valid: boolean; payload?: Record<string, unknown> } {
-  const secret = getJwtSecret();
-  if (!secret) return { valid: false };
-
-  const parts = token.split('.');
-  if (parts.length !== 3) return { valid: false };
-  const [headerB64, payloadB64, sigB64] = parts;
-
-  const data = `${headerB64}.${payloadB64}`;
-  const expected = crypto
-    .createHmac('sha256', secret)
-    .update(data)
-    .digest();
-
-  const expectedB64 = base64url(expected);
-  // timingSafeEqual for signature
-  const a = Buffer.from(sigB64);
-  const b = Buffer.from(expectedB64);
-  if (a.length !== b.length) return { valid: false };
-  const ok = crypto.timingSafeEqual(a, b);
-  if (!ok) return { valid: false };
-
-  try {
-    const payloadJson = Buffer.from(payloadB64.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
-    const payload = JSON.parse(payloadJson);
-    if (typeof payload?.exp === 'number' && Date.now() > payload.exp) return { valid: false };
-    return { valid: true, payload };
-  } catch {
-    return { valid: false };
-  }
-}
-
-// New: adminId-based session for MongoDB auth.
-// adminData is the full admin document needed to extract password hash for fingerprint.
-export async function setAdminJwtSession(adminId?: string, adminData?: any) {
-
-  const jwtSecret = getJwtSecret();
-  if (!jwtSecret) throw new Error('ADMIN_JWT_SECRET not configured');
-
-  // exp: 8 hours
-  const exp = Date.now() + 60 * 60 * 8 * 1000;
-
-  const subject = 'admin';
-
-  // Fingerprint includes adminId, passwordVersion, and last 20 chars of password hash
-  // so that old tokens invalidate when password changes.
-  let fingerprintData = `${adminId ?? ''}`;
-  if (adminData && adminData.password && adminData.passwordVersion !== undefined) {
-    const passwordSuffix = String(adminData.password ?? '').slice(-20);
-    fingerprintData = `${adminId}:${adminData.passwordVersion}:${passwordSuffix}`;
-  }
-  const fingerprint = sha256(fingerprintData);
-
-  const token = signHS256(
-    { alg: 'HS256', typ: 'JWT' },
-    { sub: subject, aid: adminId, fp: fingerprint, exp }
-  );
-
+export async function setAdminJwtSession(
+  adminId: string,
+  adminData: { passwordVersion?: number } | null | undefined,
+) {
+  const token = await signSessionToken({
+    accountId: adminId,
+    role: 'admin',
+    sessionVersion: adminData?.passwordVersion ?? 0,
+    lifetimeSeconds: ADMIN_SESSION_SECONDS,
+    secret: secret(),
+  });
   const store = await cookies();
-  store.set(COOKIE_NAME, token, {
+  store.set(ADMIN_COOKIE_NAME, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/',
-    maxAge: 60 * 60 * 8,
+    maxAge: ADMIN_SESSION_SECONDS,
+    priority: 'high',
   });
 }
 
-
 export async function clearAdminJwtSession() {
   const store = await cookies();
-  store.delete(COOKIE_NAME);
+  store.set(ADMIN_COOKIE_NAME, '', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 0,
+    expires: new Date(0),
+  });
+}
+
+export async function getAdminSessionState(): Promise<AdminSessionState> {
+  const store = await cookies();
+  const token = store.get(ADMIN_COOKIE_NAME)?.value;
+  return token ? verifyAdminTokenState(token) : { status: 'invalid' };
 }
 
 export async function isAdminJwtAuthed() {
-  const store = await cookies();
-  const token = store.get(COOKIE_NAME)?.value;
-  if (!token) return false;
-  return await verifyAdminToken(token);
+  return (await getAdminSessionState()).status === 'valid';
 }
-

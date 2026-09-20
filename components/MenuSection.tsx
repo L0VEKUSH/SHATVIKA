@@ -44,17 +44,20 @@ function FoodCard({ item }: { item: MenuItem }) {
   const { addToCart, toggleWishlist, isInWishlist } = useCart();
   const [added, setAdded] = useState(false);
   const wishlisted = isInWishlist(item.id);
-  const [selectedVariantId, setSelectedVariantId] = useState<string>(item.variants[0]?.id || '');
+  const choices = item.variants.length > 0
+    ? item.variants
+    : [{ id: 'base', name: 'Regular', price: item.basePrice ?? 0, available: true }];
+  const [selectedVariantId, setSelectedVariantId] = useState<string>(choices[0]?.id || 'base');
 
   const handleAdd = () => {
-    const variant = item.variants.find(v => v.id === selectedVariantId);
+    const variant = choices.find(v => v.id === selectedVariantId);
     if (!variant) return;
     addToCart(item, variant);
     setAdded(true);
     setTimeout(() => setAdded(false), 1400);
   };
 
-  const selectedVariant = item.variants?.find(v => v.id === selectedVariantId) || item.variants?.[0];
+  const selectedVariant = choices.find(v => v.id === selectedVariantId) || choices[0];
   const price = selectedVariant?.price || item.basePrice || 0;
 
   return (

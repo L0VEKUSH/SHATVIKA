@@ -1,105 +1,43 @@
-import { NextResponse } from 'next/server';
-import { randomBytes } from 'crypto';
-
-/**
- * CSRF Token Endpoint
- *
- * Generates cryptographically secure CSRF tokens for POST/PUT/DELETE requests
- * Tokens are stored in HTTP-only cookies and validated on the server side
- *
- * Client flow:
- * 1. GET /api/csrf to retrieve token (set as HTTP-only cookie)
- * 2. Include token in X-CSRF-Token header or form data for state-changing requests
- * 3. Server validates token matches cookie
- */
+import { NextRequest, NextResponse } from 'next/server';
+import {
+  createCsrfToken,
+  CSRF_COOKIE_NAME,
+  CSRF_TTL_SECONDS,
+  verifyCsrfToken,
+} from '@/lib/csrf';
 
 export const dynamic = 'force-dynamic';
 
-// Token storage: In production, use Redis for distributed systems
-const csrfTokens: Map<string, { token: string; createdAt: number }> = new Map();
-
-// Cleanup expired tokens every 30 minutes
-setInterval(() => {
-  const now = Date.now();
-  const maxAge = 24 * 60 * 60 * 1000; // 24 hours
-
-  for (const [key, entry] of csrfTokens.entries()) {
-    if (now - entry.createdAt > maxAge) {
-      csrfTokens.delete(key);
-    }
-  }
-}, 30 * 60 * 1000);
-
-/**
- * Generate a new CSRF token
- * @returns Cryptographically secure token (32 bytes)
- */
-function generateToken(): string {
-  return randomBytes(32).toString('hex');
-}
-
-/**
- * GET /api/csrf
- * Returns a CSRF token for use in subsequent state-changing requests
- * Token is also set as HTTP-only cookie: X-CSRF-Token
- */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const token = generateToken();
-    const tokenId = randomBytes(16).toString('hex');
+    const current = request.cookies.get(CSRF_COOKIE_NAME)?.value;
+    const verification = current ? await verifyCsrfToken(current) : { valid: false as const };
+    const now = Math.floor(Date.now() / 1000);
+    const canReuse = verification.valid && verification.expiresAt && verification.expiresAt > now + 5 * 60;
+    const token = canReuse ? current! : await createCsrfToken();
+    const expiresAt = canReuse ? verification.expiresAt! : now + CSRF_TTL_SECONDS;
 
-    // Store token with creation time (for expiration checks)
-    csrfTokens.set(tokenId, { token, createdAt: Date.now() });
-
-    // Return token in response (client includes in X-CSRF-Token header)
-    // Also set as HTTP-only cookie for double-submit protection
     const response = NextResponse.json(
-      {
-        ok: true,
-        token,
-        message: 'Include token in X-CSRF-Token header for state-changing requests',
-      },
-      { status: 200 }
+      { ok: true, csrfToken: token, expiresAt },
+      { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } },
     );
-
-    // Set HTTP-only, Secure, SameSite cookie (server-side validation)
-    response.cookies.set({
-      name: 'X-CSRF-Token',
-      value: token,
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 24 * 60 * 60, // 24 hours
-      path: '/',
-    });
-
+    if (!canReuse) {
+      // Deliberately readable by same-origin JavaScript for the double-submit pattern.
+      response.cookies.set(CSRF_COOKIE_NAME, token, {
+        httpOnly: false,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        path: '/',
+        maxAge: CSRF_TTL_SECONDS,
+        priority: 'high',
+      });
+    }
     return response;
-  } catch (err) {
-    console.error('[GET /api/csrf] Token generation failed:', err);
+  } catch (error) {
+    console.error('[GET /api/csrf]', error instanceof Error ? error.message : 'Unknown error');
     return NextResponse.json(
-      { ok: false, error: 'TOKEN_GENERATION_FAILED' },
-      { status: 500 }
+      { ok: false, error: 'CSRF_UNAVAILABLE' },
+      { status: 503, headers: { 'Cache-Control': 'no-store' } },
     );
   }
-}
-
-/**
- * Validate CSRF token from request
- * Used by middleware to protect state-changing operations
- *
- * @param headerToken - Token from X-CSRF-Token header
- * @param cookieToken - Token from X-CSRF-Token cookie
- * @returns boolean - true if tokens match, false otherwise
- */
-function validateCSRFToken(
-  headerToken?: string,
-  cookieToken?: string
-): boolean {
-  // Both tokens must exist
-  if (!headerToken || !cookieToken) {
-    return false;
-  }
-
-  // Tokens must match exactly (double-submit cookie pattern)
-  return headerToken === cookieToken;
 }

@@ -4,51 +4,19 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowRight, ChevronDown, Star } from 'lucide-react';
 import { useAdmin } from '@/context/AdminContext';
+import { apiRequest } from '@/lib/apiClient';
+import { formatINR } from '@/lib/currency';
 
 interface HeroProps {
   onOrderNow: () => void;
 }
-
-/* ── Floating food card data ─────────────────────────── */
-const floatingCards = [
-  {
-    id: 'fc1',
-    emoji: '🥟',
-    name: 'Special Momos',
-    price: '',
-    rating: '',
-    top: '18%', left: '5%',
-    delay: 0,
-    animation: 'animate-float',
-  },
-  
-  {
-    id: 'fc3',
-    emoji: '🍔',
-    name: 'Special Burger',
-    price: '',
-    rating: '',
-    top: '22%', right: '4%',
-    delay: 0.4,
-    animation: 'animate-float-delay',
-  },
-];
-
-/* ── Badge pill ──────────────────────────────────────── */
-const Badge = ({ icon, text }: { icon: React.ReactNode; text: string }) => (
-  <div className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full glass text-xs font-medium text-gray-300 border border-white/8">
-    {icon}
-    {text}
-  </div>
-);
 
 export default function Hero({ onOrderNow }: HeroProps) {
   const { stats, adminMenuItems } = useAdmin();
   const [avgRating, setAvgRating] = useState<number | null>(null);
 
   useEffect(() => {
-    fetch('/api/reviews?status=approved&menuItemId=null&limit=1')
-      .then(r => r.ok ? r.json() : null)
+    apiRequest<{ avgRating: number; total: number }>('/api/reviews?status=approved&menuItemId=null&limit=1')
       .then(data => {
         if (data?.avgRating && data.total > 0) setAvgRating(data.avgRating);
       })
@@ -60,8 +28,25 @@ export default function Hero({ onOrderNow }: HeroProps) {
     : avgRating
       ? [{ value: `${avgRating}★`, label: 'Average Rating' }]
       : adminMenuItems.length > 0
-        ? [{ value: `${adminMenuItems.length}+`, label: 'Menu Items' }]
+        ? [{ value: `${adminMenuItems.length}`, label: 'Current Menu Items' }]
         : [];
+  const floatingCards = adminMenuItems.slice(0, 2).map((item, index) => {
+    const prices = item.variants.length
+      ? item.variants.map((variant) => variant.price)
+      : [item.basePrice ?? (item.basePricePaise ?? 0) / 100];
+    return {
+      id: item.id,
+      emoji: item.emoji,
+      name: item.name,
+      price: formatINR(Math.min(...prices)),
+      rating: item.reviewCount > 0 ? `${item.rating.toFixed(1)} (${item.reviewCount})` : '',
+      top: index === 0 ? '18%' : '22%',
+      left: index === 0 ? '5%' : undefined,
+      right: index === 1 ? '4%' : undefined,
+      delay: index * 0.4,
+      animation: index === 0 ? 'animate-float' : 'animate-float-delay',
+    };
+  });
 
   return (
     <section className="relative min-h-screen flex flex-col items-center justify-center
@@ -125,10 +110,12 @@ export default function Hero({ onOrderNow }: HeroProps) {
           <div>
             <p className="text-xs font-semibold text-white leading-tight">{card.name}</p>
             <p className="flame-text text-sm font-black mt-0.5">{card.price}</p>
-            <div className="flex items-center gap-1 mt-0.5">
-              <Star className="w-2.5 h-2.5 fill-[#FFD700] text-[#FFD700]" />
-              <span className="text-[10px] text-gray-400 font-medium">{card.rating}</span>
-            </div>
+            {card.rating && (
+              <div className="flex items-center gap-1 mt-0.5">
+                <Star className="w-2.5 h-2.5 fill-[#FFD700] text-[#FFD700]" aria-hidden="true" />
+                <span className="text-[10px] text-gray-400 font-medium">{card.rating}</span>
+              </div>
+            )}
           </div>
         </motion.div>
       ))}
@@ -162,7 +149,7 @@ export default function Hero({ onOrderNow }: HeroProps) {
               animate={{ opacity: 1 }}
               transition={{ delay: 0.2 }}
             >
-              Fast.{' '}
+              Browse.{' '}
             </motion.span>
             <motion.span
               className="inline-block text-white"
@@ -170,7 +157,7 @@ export default function Hero({ onOrderNow }: HeroProps) {
               animate={{ opacity: 1 }}
               transition={{ delay: 0.35 }}
             >
-              Fresh.
+              Choose.
             </motion.span>
             <br />
             <motion.span
@@ -179,7 +166,7 @@ export default function Hero({ onOrderNow }: HeroProps) {
               animate={{ opacity: 1 }}
               transition={{ delay: 0.5 }}
             >
-              Delicious.
+              Order.
             </motion.span>
           </motion.h1>
         </div>
@@ -191,8 +178,8 @@ export default function Hero({ onOrderNow }: HeroProps) {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.65, duration: 0.6 }}
         >
-          Premium momos, burgers, south indian specials, and handcrafted shakes —{' '}
-          <span className="text-white font-medium">crafted with pure ingredients, served with love.</span>
+          See the current catalogue, prices, and availability.{' '}
+          <span className="text-white font-medium">Final charges and serviceability are validated at checkout.</span>
         </motion.p>
 
         {/* CTA Buttons */}

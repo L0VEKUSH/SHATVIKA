@@ -7,6 +7,7 @@ import Link from 'next/link';
 import type { Review } from '@/types';
 import Image from 'next/image';
 import { useAuth } from '@/context/AuthContext';
+import { ApiClientError, apiRequest } from '@/lib/apiClient';
 
 /* ── Utilities ─────────────────────────────────── */
 function Stars({ rating, interactive = false, onChange }: { rating: number; interactive?: boolean; onChange?: (r: number) => void }) {
@@ -58,6 +59,7 @@ function ReviewForm({ onSubmit }: { onSubmit: () => void }) {
   const [rating, setRating] = useState(5);
   const [text, setText] = useState('');
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [mediaAssetId, setMediaAssetId] = useState<string | null>(null);
   const [imageUploading, setImageUploading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,13 +72,16 @@ function ReviewForm({ onSubmit }: { onSubmit: () => void }) {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const res = await fetch('/api/upload', { method: 'POST', body: formData });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error ?? 'Upload failed');
-      }
-      const data = await res.json();
+      const data = await apiRequest<{ ok: true; assetId: string; imageUrl: string }>(
+        '/api/upload?scope=review',
+        { method: 'POST', body: formData },
+      );
+      const previousAssetId = mediaAssetId;
       setImageUrl(data.imageUrl ?? null);
+      setMediaAssetId(data.assetId);
+      if (previousAssetId && previousAssetId !== data.assetId) {
+        await apiRequest('/api/upload', { method: 'DELETE', body: { assetId: previousAssetId } }).catch(() => undefined);
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to upload image');
     } finally {
@@ -90,43 +95,35 @@ function ReviewForm({ onSubmit }: { onSubmit: () => void }) {
     setError(null);
 
     try {
-      const res = await fetch('/api/reviews', {
+      await apiRequest('/api/reviews', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
+        body: {
           rating,
           text: text.trim() || undefined,
           imageUrl: imageUrl ?? undefined,
-        }),
+          mediaAssetId: mediaAssetId ?? undefined,
+        },
       });
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        const code = body?.error ?? `HTTP_${res.status}`;
-        if (code === 'UNAUTHENTICATED' || code === 'UNAUTHORIZED') {
-          throw new Error('Please sign in to submit a review.');
-        }
-        if (code === 'NOT_VERIFIED') {
-          throw new Error('Only verified customers with a delivered order can review.');
-        }
-        if (code === 'DUPLICATE_REVIEW') {
-          throw new Error('You have already submitted a review.');
-        }
-        throw new Error(body?.message ?? code);
-      }
 
       setSuccess(true);
       setRating(5);
       setText('');
       setImageUrl(null);
+      setMediaAssetId(null);
 
       setTimeout(() => {
         setSuccess(false);
         onSubmit();
       }, 2500);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to submit review');
+      const messages: Record<string, string> = {
+        UNAUTHENTICATED: 'Please sign in to submit a review.',
+        NOT_VERIFIED: 'Only verified customers with a delivered order can review.',
+        DUPLICATE_REVIEW: 'You have already submitted a review.',
+        MEDIA_ASSET_NOT_AVAILABLE: 'The review attachment is no longer available. Upload it again.',
+        TRANSACTION_DATABASE_REQUIRED: 'Review submission is temporarily unavailable because safe database transactions are not configured.',
+      };
+      setError(err instanceof ApiClientError ? messages[err.code] ?? err.message : err instanceof Error ? err.message : 'Failed to submit review');
     } finally {
       setLoading(false);
     }
@@ -150,7 +147,7 @@ function ReviewForm({ onSubmit }: { onSubmit: () => void }) {
         <p className="text-gray-400 text-sm mb-6">
           Only verified customers who have received a delivered order can share a review.
         </p>
-        <Link href="/auth/login?from=/#reviews" className="btn-flame inline-flex px-6 py-2.5 text-sm">
+        <Link href="/auth/login?returnTo=%2F%23reviews" className="btn-flame inline-flex px-6 py-2.5 text-sm">
           Sign In
         </Link>
       </div>
@@ -275,17 +272,11 @@ function ReviewCard({ review }: { review: ReviewWithHelp }) {
 
     setLoading(true);
     try {
-      const res = await fetch(`/api/reviews/${review.id}/helpful`, {
+      const data = await apiRequest<{ helpfulCount: number; helpful: boolean }>(`/api/reviews/${review.id}/helpful`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ helpful: !helpful }),
+        body: { helpful: !helpful },
       });
-
-      if (!res.ok) throw new Error('Failed to mark helpful');
-
-      const data = await res.json();
-      const nowHelpful = !helpful;
+      const nowHelpful = data.helpful;
       setHelpful(nowHelpful);
       setHelpfulCount(data.helpfulCount ?? 0);
       if (typeof window !== 'undefined') {
@@ -427,14 +418,13 @@ export default function Reviews() {
     setError(null);
 
     try {
-      const res = await fetch(`/api/reviews?status=approved&menuItemId=null&sort=${sort}&page=${page}&limit=12`);
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error ?? `HTTP_${res.status}`);
-      }
-
-      const data = await res.json();
+      const data = await apiRequest<{
+        reviews: ReviewWithHelp[];
+        total: number;
+        pages: number;
+        avgRating: number;
+        distribution: Record<1 | 2 | 3 | 4 | 5, number>;
+      }>(`/api/reviews?status=approved&menuItemId=null&sort=${sort}&page=${page}&limit=12`);
       setReviews((data?.reviews ?? []) as ReviewWithHelp[]);
       setTotal(data?.total ?? 0);
       setPages(data?.pages ?? 0);

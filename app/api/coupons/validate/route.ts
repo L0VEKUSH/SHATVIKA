@@ -1,94 +1,80 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { connectToMongo } from '@/lib/mongoose';
-import { Coupon } from '@/models/Coupon';
 import { z } from 'zod';
+import { logServerError } from '@/lib/apiError';
+import { BusinessRulesConfigurationError } from '@/lib/businessRules';
+import { getCustomerSessionState } from '@/lib/customerJwt';
+import { CartQuoteError, quoteCustomerCart } from '@/lib/orders/cartQuote';
+import { distributedRateLimit } from '@/lib/rateLimit';
 
-const validateCouponSchema = z.object({
-  code: z.string().min(1).toUpperCase(),
-  subtotal: z.number().nonnegative().optional(),
-});
+export const dynamic = 'force-dynamic';
 
-export async function POST(req: NextRequest) {
+const schema = z.object({
+  code: z.string().trim().min(1).max(50),
+  items: z.array(z.object({
+    menuItemId: z.string().trim().min(1).max(64),
+    variantId: z.string().trim().min(1).max(120).optional(),
+    quantity: z.number().int().min(1).max(100),
+  }).strict()).min(1).max(100),
+}).strict();
+
+const PRIVATE_HEADERS = { 'Cache-Control': 'private, no-store' } as const;
+
+export async function POST(request: NextRequest) {
+  const customer = await getCustomerSessionState();
+  if (customer.status !== 'valid') {
+    return NextResponse.json(
+      { ok: false, error: customer.status === 'database_unavailable' ? 'DATABASE_UNAVAILABLE' : 'UNAUTHENTICATED' },
+      { status: customer.status === 'database_unavailable' ? 503 : 401, headers: PRIVATE_HEADERS },
+    );
+  }
+  const parsed = schema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json(
+      { ok: false, error: 'VALIDATION_FAILED', details: parsed.error.flatten() },
+      { status: 400, headers: PRIVATE_HEADERS },
+    );
+  }
+
   try {
-    await connectToMongo();
-
-    const payload = await req.json().catch(() => null);
-    if (!payload) {
-      return NextResponse.json({ ok: false, error: 'INVALID_JSON' }, { status: 400 });
-    }
-
-    const parsed = validateCouponSchema.safeParse(payload);
-    if (!parsed.success) {
+    const limit = await distributedRateLimit(`coupon-validate:${customer.accountId}`, 20, 60);
+    if (!limit.allowed) {
       return NextResponse.json(
-        { ok: false, error: 'VALIDATION_FAILED', details: parsed.error.flatten() },
-        { status: 400 }
-      );
-    }
-
-    const { code, subtotal } = parsed.data;
-
-    // Find coupon (case-insensitive)
-    const coupon = await Coupon.findOne({ code: code.toUpperCase() }).lean();
-    if (!coupon) {
-      return NextResponse.json({ ok: false, error: 'COUPON_NOT_FOUND' }, { status: 404 });
-    }
-
-    // Check if active
-    if (!coupon.isActive) {
-      return NextResponse.json({ ok: false, error: 'COUPON_INACTIVE' }, { status: 400 });
-    }
-
-    // Check if expired
-    if (new Date() > new Date(coupon.expiresAt)) {
-      return NextResponse.json({ ok: false, error: 'COUPON_EXPIRED' }, { status: 410 });
-    }
-
-    // Check usage limit
-    if (coupon.usageLimit && coupon.usageCount >= coupon.usageLimit) {
-      return NextResponse.json({ ok: false, error: 'COUPON_LIMIT_REACHED' }, { status: 429 });
-    }
-
-    // Check minimum order value
-    if (subtotal !== undefined && subtotal < (coupon.minOrderValue || 0)) {
-      return NextResponse.json(
+        { ok: false, error: 'TOO_MANY_REQUESTS', retryAfter: limit.retryAfter },
         {
-          ok: false,
-          error: 'MINIMUM_ORDER_NOT_MET',
-          details: { minOrderValue: coupon.minOrderValue || 0, provided: subtotal },
+          status: 429,
+          headers: { ...PRIVATE_HEADERS, 'Retry-After': String(limit.retryAfter ?? 60) },
         },
-        { status: 400 }
       );
     }
-
-    // Calculate discount
-    let calculatedDiscount = 0;
-    if (subtotal !== undefined) {
-      if (coupon.discountType === 'percentage') {
-        calculatedDiscount = (subtotal * coupon.discountValue) / 100;
-      } else if (coupon.discountType === 'fixed') {
-        calculatedDiscount = coupon.discountValue;
-      }
-
-      // Cap at maxDiscount if set
-      if (coupon.maxDiscount && calculatedDiscount > coupon.maxDiscount) {
-        calculatedDiscount = coupon.maxDiscount;
-      }
-    }
-
+    const quote = await quoteCustomerCart({
+      userId: customer.accountId,
+      lines: parsed.data.items,
+      couponCode: parsed.data.code,
+    });
+    if (!quote.coupon) throw new CartQuoteError('COUPON_NOT_FOUND', 404);
     return NextResponse.json({
       ok: true,
-      coupon: {
-        code: coupon.code,
-        discountType: coupon.discountType,
-        discountValue: coupon.discountValue,
-        minOrderValue: coupon.minOrderValue,
-        maxDiscount: coupon.maxDiscount,
-        applicableCategories: coupon.applicableCategories,
-      },
-      calculatedDiscount,
-    });
-  } catch (err) {
-    console.error('[POST /api/coupons/validate]', err);
-    return NextResponse.json({ ok: false, error: 'INTERNAL_ERROR' }, { status: 500 });
+      coupon: quote.coupon,
+      subtotalPaise: quote.subtotalPaise,
+      discountPaise: quote.discountPaise,
+      calculatedDiscount: quote.discount,
+      provisional: true,
+      message: 'Final eligibility and amount are revalidated atomically at checkout.',
+    }, { headers: PRIVATE_HEADERS });
+  } catch (error) {
+    if (error instanceof CartQuoteError) {
+      return NextResponse.json(
+        { ok: false, error: error.code, details: error.details },
+        { status: error.status, headers: PRIVATE_HEADERS },
+      );
+    }
+    if (error instanceof BusinessRulesConfigurationError) {
+      return NextResponse.json(
+        { ok: false, error: 'CHECKOUT_NOT_CONFIGURED', details: { missing: error.missing } },
+        { status: 503, headers: PRIVATE_HEADERS },
+      );
+    }
+    logServerError({ route: 'POST /api/coupons/validate', err: error, requestId: request.headers.get('x-request-id') });
+    return NextResponse.json({ ok: false, error: 'COUPON_VALIDATION_FAILED' }, { status: 500, headers: PRIVATE_HEADERS });
   }
 }

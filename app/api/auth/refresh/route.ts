@@ -1,47 +1,22 @@
-﻿import { NextResponse } from "next/server";
-import { User } from "@/models/User";
-import { connectToMongo } from "@/lib/mongoose";
-import { getCustomerId, setCustomerSession, isCustomerAuthed } from "@/lib/customerAuth";
+import { NextRequest, NextResponse } from 'next/server';
+import { getCustomerSessionState, setCustomerJwtSession } from '@/lib/customerJwt';
+import { distributedRateLimit } from '@/lib/rateLimit';
 
-export async function POST() {
-  try {
-    // Check if customer is authenticated
-    const isAuthed = await isCustomerAuthed();
-    if (!isAuthed) {
-      return NextResponse.json(
-        { ok: false, error: "Not authenticated" },
-        { status: 401 }
-      );
-    }
-
-    const userId = await getCustomerId();
-    if (!userId) {
-      return NextResponse.json(
-        { ok: false, error: "Not authenticated" },
-        { status: 401 }
-      );
-    }
-
-    await connectToMongo();
-
-    // Get updated user data
-    const user = await User.findById(userId).lean();
-    if (!user) {
-      return NextResponse.json(
-        { ok: false, error: "User not found" },
-        { status: 404 }
-      );
-    }
-
-    // Refresh token with sliding window (8 hours)
-    await setCustomerSession(userId, user, false);
-
-    return NextResponse.json({ ok: true });
-  } catch (err) {
-    console.error("[CustomerRefresh] error:", err);
+export async function POST(_request: NextRequest) {
+  const state = await getCustomerSessionState();
+  if (state.status !== 'valid') {
     return NextResponse.json(
-      { ok: false, error: "Failed to refresh session" },
-      { status: 500 }
+      { ok: false, error: state.status === 'database_unavailable' ? 'DATABASE_UNAVAILABLE' : 'UNAUTHENTICATED' },
+      { status: state.status === 'database_unavailable' ? 503 : 401 },
     );
+  }
+  try {
+    const limited = await distributedRateLimit(`session-refresh:${state.accountId}`, 10, 60);
+    if (!limited.allowed) return NextResponse.json({ ok: false, error: 'RATE_LIMITED' }, { status: 429 });
+    const remembered = state.claims.exp - state.claims.iat > 24 * 60 * 60;
+    await setCustomerJwtSession(state.accountId, { passwordVersion: state.claims.sv }, remembered);
+    return NextResponse.json({ ok: true }, { headers: { 'Cache-Control': 'private, no-store' } });
+  } catch {
+    return NextResponse.json({ ok: false, error: 'SESSION_REFRESH_UNAVAILABLE' }, { status: 503 });
   }
 }

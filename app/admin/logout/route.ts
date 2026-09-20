@@ -1,16 +1,11 @@
 import { NextResponse } from 'next/server';
 import { clearAdminSession } from '@/lib/adminAuth';
 
-function loginRedirect(request: Request) {
-  return NextResponse.redirect(new URL('/admin/login', request.url));
+export async function POST() {
+  await clearAdminSession();
+  return NextResponse.json({ ok: true }, { headers: { 'Cache-Control': 'private, no-store' } });
 }
 
-export async function POST(request: Request) {
-  await clearAdminSession();
-  return loginRedirect(request);
-}
-
-export async function GET(request: Request) {
-  await clearAdminSession();
-  return loginRedirect(request);
+export async function GET() {
+  return NextResponse.json({ ok: false, error: 'METHOD_NOT_ALLOWED' }, { status: 405, headers: { Allow: 'POST' } });
 }

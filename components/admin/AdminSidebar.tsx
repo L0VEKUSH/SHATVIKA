@@ -2,12 +2,13 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, UtensilsCrossed, ShoppingBag,
-  Tag, Menu, X, ChevronRight, FileText, Image, Star,
+  Tag, Menu, X, ChevronRight, FileText, Image, Star, LogOut, MessageSquare, CircleDollarSign,
 } from 'lucide-react';
+import { apiRequest, clearApiClientSession } from '@/lib/apiClient';
 
 const NAV = [
   { href: '/admin',         icon: LayoutDashboard,  label: 'Dashboard'   },
@@ -15,14 +16,31 @@ const NAV = [
   { href: '/admin/menu',    icon: UtensilsCrossed,   label: 'Menu'        },
   { href: '/admin/gallery', icon: Image,             label: 'Gallery'     },
   { href: '/admin/reviews', icon: Star,              label: 'Reviews'     },
+  { href: '/admin/contacts', icon: MessageSquare,    label: 'Contacts'    },
   { href: '/admin/orders',  icon: ShoppingBag,       label: 'Orders'      },
+  { href: '/admin/finance', icon: CircleDollarSign,  label: 'Costs & stock' },
   { href: '/admin/coupons', icon: Tag,               label: 'Coupons'     },
 ];
 
 export default function AdminSidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const logout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await apiRequest('/admin/logout', { method: 'POST' });
+      clearApiClientSession();
+      router.replace('/admin/login');
+      router.refresh();
+    } finally {
+      setLoggingOut(false);
+    }
+  };
 
   const NavItem = ({ href, icon: Icon, label }: typeof NAV[0]) => {
     const active = pathname === href;
@@ -88,6 +106,15 @@ export default function AdminSidebar() {
           <span className="text-base shrink-0">🏠</span>
           {!collapsed && <span>Back to Site</span>}
         </Link>
+        <button
+          type="button"
+          onClick={logout}
+          disabled={loggingOut}
+          className="mt-1 flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-red-400 transition hover:bg-red-500/10 disabled:opacity-50"
+        >
+          <LogOut className="h-5 w-5 shrink-0" />
+          {!collapsed && <span>{loggingOut ? 'Signing out…' : 'Sign out'}</span>}
+        </button>
       </div>
     </div>
   );

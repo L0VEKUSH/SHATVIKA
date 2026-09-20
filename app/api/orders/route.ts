@@ -1,35 +1,53 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getAdminSessionState } from '@/lib/adminJwt';
 import { connectToMongo } from '@/lib/mongoose';
+import { ORDER_STATUSES } from '@/lib/orders/stateMachine';
 import { Order } from '@/models/Order';
-import { isAdminJwtAuthed } from '@/lib/adminJwt';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
-  try {
-    const isAuthed = await isAdminJwtAuthed();
-    if (!isAuthed) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export async function GET(request: NextRequest) {
+  const session = await getAdminSessionState();
+  if (session.status === 'database_unavailable') {
+    return NextResponse.json({ ok: false, error: 'DATABASE_UNAVAILABLE' }, { status: 503 });
+  }
+  if (session.status !== 'valid') {
+    return NextResponse.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 });
+  }
 
+  try {
     await connectToMongo();
-    const orders = await Order.find().sort({ createdAt: -1 }).lean();
-    return NextResponse.json(orders);
-  } catch (err) {
-    console.error('[GET /api/orders]', err);
-    return NextResponse.json({ error: 'Failed to fetch orders' }, { status: 500 });
+    const pageRaw = Number(request.nextUrl.searchParams.get('page') ?? 1);
+    const pageSizeRaw = Number(request.nextUrl.searchParams.get('pageSize') ?? 50);
+    const page = Number.isInteger(pageRaw) ? Math.max(1, pageRaw) : 1;
+    const pageSize = Number.isInteger(pageSizeRaw) ? Math.min(100, Math.max(1, pageSizeRaw)) : 50;
+    const status = request.nextUrl.searchParams.get('status');
+    if (status && !(ORDER_STATUSES as readonly string[]).includes(status)) {
+      return NextResponse.json({ ok: false, error: 'INVALID_STATUS' }, { status: 400 });
+    }
+    const filter = status ? { orderStatus: status } : {};
+    const [orders, total] = await Promise.all([
+      Order.find(filter)
+        .select('-requestFingerprint -idempotencyKey')
+        .sort({ createdAt: -1, _id: -1 })
+        .skip((page - 1) * pageSize)
+        .limit(pageSize)
+        .lean(),
+      Order.countDocuments(filter),
+    ]);
+    return NextResponse.json(
+      { ok: true, orders, page, pageSize, total, pages: Math.ceil(total / pageSize) },
+      { headers: { 'Cache-Control': 'private, no-store' } },
+    );
+  } catch (error) {
+    console.error('[GET /api/orders]', error instanceof Error ? error.message : 'Unknown error');
+    return NextResponse.json({ ok: false, error: 'DATABASE_UNAVAILABLE' }, { status: 503 });
   }
 }
 
-export async function POST(req: NextRequest) {
-  try {
-    const isAuthed = await isAdminJwtAuthed();
-    if (!isAuthed) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    return NextResponse.json(
-      { error: 'Use /api/user/orders for customer checkout' },
-      { status: 405 }
-    );
-  } catch (err) {
-    console.error('[POST /api/orders]', err);
-    return NextResponse.json({ error: 'Failed to create order' }, { status: 500 });
-  }
+export async function POST() {
+  return NextResponse.json(
+    { ok: false, error: 'METHOD_NOT_ALLOWED', message: 'Use customer checkout to create an order.' },
+    { status: 405, headers: { Allow: 'GET' } },
+  );
 }

@@ -5,6 +5,10 @@ export type AdminDoc = {
   email: string;
   password: string;
   passwordVersion: number;
+  role?: 'admin';
+  permissions?: string[];
+  isActive?: boolean;
+  bootstrapMarker?: string;
   createdAt?: Date;
   updatedAt?: Date;
 };
@@ -20,25 +24,32 @@ const adminSchema = new Schema(
       match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email address'],
       index: true,
     },
-    // bcrypt hash string
-    password: { type: String, required: true },
-    // Incremented when password changes; used in fingerprint to invalidate old tokens
-    passwordVersion: { type: Number, default: 0 },
+    password: { type: String, required: true, select: false },
+    passwordVersion: { type: Number, default: 0, select: false },
+    role: { type: String, enum: ['admin'], default: 'admin', immutable: true },
+    permissions: { type: [String], default: ['*'] },
+    isActive: { type: Boolean, default: true },
+    // Sparse unique marker closes concurrent initial-bootstrap races.
+    bootstrapMarker: { type: String, select: false },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
+
+adminSchema.index({ bootstrapMarker: 1 }, { unique: true, sparse: true });
 
 adminSchema.set('toJSON', {
   transform: (_doc, ret) => {
-    const anyRet = ret as any;
-    if (anyRet._id) anyRet.id = anyRet._id.toString();
-    delete anyRet._id;
-    delete anyRet.password;
-    return anyRet;
+    const safe = ret as Record<string, unknown>;
+    if (safe._id) safe.id = String(safe._id);
+    delete safe._id;
+    delete safe.password;
+    delete safe.passwordVersion;
+    delete safe.bootstrapMarker;
+    delete safe.__v;
+    return safe;
   },
 });
 
-export const Admin: Model<any> =
-  (mongoose.models.Admin as Model<any> | undefined) ??
-  mongoose.model('Admin', adminSchema);
+export const Admin: Model<AdminDoc> =
+  (mongoose.models.Admin as Model<AdminDoc> | undefined) ?? mongoose.model<AdminDoc>('Admin', adminSchema);
 

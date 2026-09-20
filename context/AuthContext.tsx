@@ -8,6 +8,7 @@ import {
   useCallback,
   ReactNode,
 } from 'react';
+import { ApiClientError, apiRequest, clearApiClientSession } from '@/lib/apiClient';
 
 export interface Customer {
   id: string;
@@ -53,31 +54,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch current customer on mount
+  const loadCurrentCustomer = useCallback(async (options?: { initial?: boolean }) => {
+    try {
+      const data = await apiRequest<{ ok: true; user: Customer }>('/api/auth/me', {
+        suppressSessionExpiry: true,
+        cache: 'no-store',
+      });
+      setCustomer(data.user);
+      setError(null);
+    } catch (caught) {
+      if (caught instanceof ApiClientError && caught.status === 401) {
+        setCustomer(null);
+        setError(null);
+        return;
+      }
+      if (options?.initial) setCustomer(null);
+      setError('Your account status could not be checked. Please try again.');
+    }
+  }, []);
+
+  // Fetch the current customer on mount and react to expiry/logout in another tab.
   useEffect(() => {
     const initAuth = async () => {
       try {
         setIsLoading(true);
-        const res = await fetch('/api/auth/me', {
-          credentials: 'include',
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          if (data.user) {
-            setCustomer(data.user);
-            setError(null);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to fetch auth user:', err);
+        await loadCurrentCustomer({ initial: true });
       } finally {
         setIsLoading(false);
       }
     };
 
-    initAuth();
-  }, []);
+    const expire = () => {
+      setCustomer(null);
+      setError(null);
+      setIsLoading(false);
+    };
+    window.addEventListener('shatvika:session-expired', expire);
+    void initAuth();
+    return () => window.removeEventListener('shatvika:session-expired', expire);
+  }, [loadCurrentCustomer]);
 
   const clearError = useCallback(() => {
     setError(null);
@@ -89,29 +104,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setError(null);
         setIsLoading(true);
 
-        const res = await fetch('/api/auth/login', {
+        await apiRequest<{ ok: true }>('/api/auth/login', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password, rememberMe }),
-          credentials: 'include',
+          body: { email, password, rememberMe },
+          suppressSessionExpiry: true,
         });
-
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || 'Login failed');
-        }
-
-        // Fetch updated customer data
-        const meRes = await fetch('/api/auth/me', {
-          credentials: 'include',
-        });
-
-        if (meRes.ok) {
-          const data = await meRes.json();
-          if (data.user) {
-            setCustomer(data.user);
-          }
-        }
+        await loadCurrentCustomer();
       } catch (err) {
         const message = err instanceof Error ? err.message : 'An error occurred';
         setError(message);
@@ -120,7 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsLoading(false);
       }
     },
-    []
+    [loadCurrentCustomer]
   );
 
   const signup = useCallback(
@@ -129,29 +127,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setError(null);
         setIsLoading(true);
 
-        const res = await fetch('/api/auth/signup', {
+        await apiRequest<{ ok: true }>('/api/auth/signup', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fullName, email, phone, password, confirmPassword }),
-          credentials: 'include',
+          body: { fullName, email, phone, password, confirmPassword },
+          suppressSessionExpiry: true,
         });
-
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || 'Signup failed');
-        }
-
-        // Fetch customer data
-        const meRes = await fetch('/api/auth/me', {
-          credentials: 'include',
-        });
-
-        if (meRes.ok) {
-          const data = await meRes.json();
-          if (data.user) {
-            setCustomer(data.user);
-          }
-        }
+        await loadCurrentCustomer();
       } catch (err) {
         const message = err instanceof Error ? err.message : 'An error occurred';
         setError(message);
@@ -160,7 +141,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsLoading(false);
       }
     },
-    []
+    [loadCurrentCustomer]
   );
 
   const logout = useCallback(async () => {
@@ -168,15 +149,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setError(null);
       setIsLoading(true);
 
-      await fetch('/api/auth/logout', {
+      await apiRequest<{ ok: true }>('/api/auth/logout', {
         method: 'POST',
-        credentials: 'include',
       });
-
       setCustomer(null);
+      clearApiClientSession();
     } catch (err) {
-      console.error('Logout error:', err);
-      setCustomer(null);
+      const message = err instanceof Error ? err.message : 'Logout failed';
+      setError(message);
+      throw err;
     } finally {
       setIsLoading(false);
     }
@@ -185,44 +166,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshCustomer = useCallback(async () => {
     try {
       setError(null);
-      const res = await fetch('/api/auth/me', {
-        credentials: 'include',
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.user) {
-          setCustomer(data.user);
-        }
-      } else {
-        setCustomer(null);
-      }
-    } catch (err) {
-      console.error('Failed to refresh customer:', err);
-      setCustomer(null);
+      await loadCurrentCustomer();
+    } catch {
+      // loadCurrentCustomer exposes a user-safe error and preserves state on
+      // transient failures.
     }
-  }, []);
+  }, [loadCurrentCustomer]);
 
   const updateProfile = useCallback(
     async (data: { fullName?: string; phone?: string; profilePhoto?: string }) => {
       try {
         setError(null);
-        const res = await fetch('/api/user/profile', {
+        const responseData = await apiRequest<{ ok: true; user: Customer }>('/api/user/profile', {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data),
-          credentials: 'include',
+          body: data,
         });
-
-        if (!res.ok) {
-          const responseData = await res.json();
-          throw new Error(responseData.error || 'Failed to update profile');
-        }
-
-        const responseData = await res.json();
-        if (responseData.user) {
-          setCustomer(responseData.user);
-        }
+        setCustomer(responseData.user);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'An error occurred';
         setError(message);

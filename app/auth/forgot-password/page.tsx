@@ -4,12 +4,14 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Mail, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { validateEmail } from '@/lib/validators';
+import { apiRequest } from '@/lib/apiClient';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [acceptedMessage, setAcceptedMessage] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,17 +26,14 @@ export default function ForgotPasswordPage() {
     try {
       setIsSubmitting(true);
 
-      const res = await fetch('/api/auth/forgot-password', {
+      const data = await apiRequest<{ message?: string }>('/api/auth/forgot-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
+        body: { email },
       });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(data?.error || 'Request failed');
-
+      setAcceptedMessage(data.message ?? 'If the account exists, reset instructions will arrive when email delivery is available.');
       setSuccess(true);
-    } catch {
-      setError('Something went wrong. Please try again later.');
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Something went wrong. Please try again later.');
     } finally {
       setIsSubmitting(false);
     }
@@ -50,7 +49,7 @@ export default function ForgotPasswordPage() {
 
         <h1 className="text-2xl font-black text-gray-900 dark:text-white mb-2">Forgot Password?</h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-8">
-          No worries, we&apos;ll send you reset instructions.
+          Request a single-use password reset link. Delivery must be configured by the site owner.
         </p>
 
         {error && (
@@ -65,9 +64,9 @@ export default function ForgotPasswordPage() {
             <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
               <CheckCircle2 className="w-8 h-8 text-green-600 dark:text-green-400" />
             </div>
-            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Check your email</h3>
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Request accepted</h3>
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-              We sent a password reset link to <span className="font-semibold">{email}</span>
+              {acceptedMessage}
             </p>
             <button
               onClick={() => {

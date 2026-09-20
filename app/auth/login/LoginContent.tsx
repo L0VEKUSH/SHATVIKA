@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { AuthForm, FormField } from '@/components/AuthForm';
 import { validateEmail } from '@/lib/validators';
 import { useAuth } from '@/context/AuthContext';
+import { safeReturnPath } from '@/lib/returnPath';
 
 export default function LoginContent() {
   const router = useRouter();
@@ -44,29 +45,11 @@ export default function LoginContent() {
 
     setIsLoading(true);
     try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: formData.email,
-          password: formData.password,
-          rememberMe: formData.rememberMe,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!data.ok) {
-        setApiError(data.message || 'Login failed. Please try again.');
-        return;
-      }
-
       await login(formData.email, formData.password, formData.rememberMe);
-      const redirect = searchParams?.get('redirect') || '/customer/dashboard';
-      router.push(redirect);
+      const redirect = safeReturnPath(searchParams?.get('returnTo'), '/customer');
+      router.replace(redirect);
     } catch (err) {
-      setApiError('An error occurred. Please try again.');
-      console.error('Login error:', err);
+      setApiError(err instanceof Error ? err.message : 'An error occurred. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -81,6 +64,7 @@ export default function LoginContent() {
       onChange: (val) => setFormData(prev => ({ ...prev, email: val })),
       placeholder: 'your@email.com',
       error: errors.email,
+      autoComplete: 'username',
     },
     {
       name: 'password',
@@ -90,6 +74,7 @@ export default function LoginContent() {
       onChange: (val) => setFormData(prev => ({ ...prev, password: val })),
       placeholder: 'Enter your password',
       error: errors.password,
+      autoComplete: 'current-password',
     },
   ];
 
@@ -101,7 +86,7 @@ export default function LoginContent() {
           <p className="text-gray-400 text-center mb-8">Sign in to your account to continue</p>
 
           {apiError && (
-            <div className="mb-6 p-4 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+            <div role="alert" className="mb-6 p-4 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
               {apiError}
             </div>
           )}
@@ -115,8 +100,11 @@ export default function LoginContent() {
 
           {/* Remember Me & Forgot Password */}
           <div className="mt-6 flex items-center justify-between">
-            <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer hover:text-white transition">
+            <label htmlFor="remember-me" className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer hover:text-white transition">
               <input
+                id="remember-me"
+                name="rememberMe"
+                autoComplete="off"
                 type="checkbox"
                 checked={formData.rememberMe}
                 onChange={(e) => setFormData(prev => ({ ...prev, rememberMe: e.target.checked }))}

@@ -1,50 +1,102 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
+import { getAdminSessionState } from '@/lib/adminJwt';
 import { connectToMongo } from '@/lib/mongoose';
+import { distributedRateLimit, getClientIp } from '@/lib/rateLimit';
 import { MenuItem } from '@/models/MenuItem';
-import { isAdminJwtAuthed } from '@/lib/adminJwt';
-import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest) {
-  // Rate limiting: 30 requests per minute per IP (generous for menu fetches)
-  const clientIp = getClientIp(req);
-  const rateCheck = checkRateLimit(clientIp, 30, 60 * 1000);
-  if (!rateCheck.allowed) {
-    return NextResponse.json(
-      { error: 'RATE_LIMITED', retryAfter: rateCheck.retryAfter },
-      { status: 429, headers: { 'Retry-After': String(rateCheck.retryAfter) } }
-    );
-  }
+const CATEGORIES = [
+  'Momos', 'Fries', 'Burgers', 'Patties', 'Sandwiches', 'South Indian',
+  'Shakes', 'Drinks', 'Desserts', 'Pizza',
+] as const;
 
+const variantSchema = z.object({
+  id: z.string().trim().min(1).max(120).optional(),
+  name: z.string().trim().min(1).max(60),
+  price: z.number().nonnegative().max(1_000_000),
+  costPaise: z.number().int().nonnegative().max(100_000_000).nullable().optional(),
+  available: z.boolean().optional(),
+}).strict();
+
+const menuItemInputSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(1000).optional(),
+  ingredients: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
+  images: z.array(z.string().trim().min(1).max(2048)).max(10).optional(),
+  variants: z.array(variantSchema).max(30).optional(),
+  basePrice: z.number().nonnegative().max(1_000_000).nullable().optional(),
+  costPaise: z.number().int().nonnegative().max(100_000_000).nullable().optional(),
+  rating: z.number().min(0).max(5).optional(),
+  reviewCount: z.number().int().nonnegative().optional(),
+  category: z.enum(CATEGORIES),
+  emoji: z.string().trim().min(1).max(20),
+  gradientClass: z.string().trim().min(1).max(200),
+  popular: z.boolean().optional(),
+  spicy: z.boolean().optional(),
+  vegetarian: z.boolean().optional(),
+  available: z.boolean().optional(),
+  isNew: z.boolean().optional(),
+  isNewItem: z.boolean().optional(),
+  quantity: z.number().int().nonnegative().max(1_000_000).optional(),
+  reorderPoint: z.number().int().nonnegative().max(1_000_000).optional(),
+}).strict().superRefine((value, context) => {
+  const hasVariants = Boolean(value.variants?.length);
+  const hasBase = value.basePrice !== undefined && value.basePrice !== null;
+  if (!hasVariants && !hasBase) {
+    context.addIssue({ code: 'custom', path: ['basePrice'], message: 'Provide basePrice or at least one variant' });
+  }
+  if (hasVariants && hasBase) {
+    context.addIssue({ code: 'custom', path: ['variants'], message: 'Use variants or basePrice, not both' });
+  }
+});
+
+export async function GET(request: NextRequest) {
   try {
+    const limited = await distributedRateLimit(`menu-read:${getClientIp(request)}`, 60, 60);
+    if (!limited.allowed) {
+      return NextResponse.json({ ok: false, error: 'RATE_LIMITED', retryAfter: limited.retryAfter }, {
+        status: 429,
+        headers: { 'Retry-After': String(limited.retryAfter ?? 60) },
+      });
+    }
     await connectToMongo();
-    const items = await MenuItem.find().sort({ createdAt: -1 }).lean();
-    return NextResponse.json(items);
-  } catch (err) {
-    console.error('[GET /api/menu]', err);
-    return NextResponse.json({ error: 'Failed to fetch menu items' }, { status: 500 });
+    const adminRequested = request.nextUrl.searchParams.get('scope') === 'admin';
+    let admin = false;
+    if (adminRequested) admin = (await getAdminSessionState()).status === 'valid';
+    if (adminRequested && !admin) {
+      return NextResponse.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 });
+    }
+    const filter = admin ? {} : { archivedAt: null };
+    const query = MenuItem.find(filter).sort({ createdAt: -1 });
+    if (!admin) query.select('-costPaise -variants.costPaise');
+    const items = await query.lean();
+    return NextResponse.json(items, { headers: { 'Cache-Control': admin ? 'private, no-store' : 'public, max-age=30' } });
+  } catch (error) {
+    console.error('[GET /api/menu]', error instanceof Error ? error.message : 'Unknown error');
+    return NextResponse.json({ ok: false, error: 'MENU_UNAVAILABLE' }, { status: 503 });
   }
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(request: NextRequest) {
+  const admin = await getAdminSessionState();
+  if (admin.status !== 'valid') {
+    return NextResponse.json({ ok: false, error: admin.status === 'database_unavailable' ? 'DATABASE_UNAVAILABLE' : 'UNAUTHORIZED' }, { status: admin.status === 'database_unavailable' ? 503 : 401 });
+  }
+  const parsed = menuItemInputSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json({ ok: false, error: 'VALIDATION_FAILED', details: parsed.error.flatten() }, { status: 400 });
+  }
   try {
-    const isAuthed = await isAdminJwtAuthed();
-    if (!isAuthed) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    const body = await req.json().catch(() => null);
-    if (!body || !body.name || !Array.isArray(body.variants) || body.variants.length === 0) {
-      return NextResponse.json(
-        { error: 'name and at least one variant are required' },
-        { status: 400 }
-      );
+    const { isNew, ...data } = parsed.data;
+    const created = await MenuItem.create({ ...data, isNewItem: data.isNewItem ?? isNew ?? false });
+    return NextResponse.json({ ok: true, item: created.toJSON() }, { status: 201 });
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 11000) {
+      return NextResponse.json({ ok: false, error: 'MENU_NAME_EXISTS' }, { status: 409 });
     }
-
-    await connectToMongo();
-    const newItem = await MenuItem.create(body);
-    return NextResponse.json(newItem, { status: 201 });
-  } catch (err) {
-    console.error('[POST /api/menu]', err);
-    return NextResponse.json({ error: 'Failed to create menu item' }, { status: 500 });
+    console.error('[POST /api/menu]', error instanceof Error ? error.message : 'Unknown error');
+    return NextResponse.json({ ok: false, error: 'MENU_CREATE_FAILED' }, { status: 500 });
   }
 }

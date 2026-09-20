@@ -1,56 +1,33 @@
-﻿import { NextResponse } from "next/server";
-import { User } from "@/models/User";
-import { connectToMongo } from "@/lib/mongoose";
-import { getCustomerId, isCustomerAuthed } from "@/lib/customerAuth";
+import { NextRequest, NextResponse } from 'next/server';
+import { getCustomerSessionState } from '@/lib/customerJwt';
+import { logServerError } from '@/lib/apiError';
+import { User } from '@/models/User';
 
-export async function GET() {
-  try {
-    // Check if customer is authenticated
-    const isAuthed = await isCustomerAuthed();
-    if (!isAuthed) {
-      return NextResponse.json(
-        { ok: false, error: "Not authenticated" },
-        { status: 401 }
-      );
-    }
+export const dynamic = 'force-dynamic';
 
-    const userId = await getCustomerId();
-    if (!userId) {
-      return NextResponse.json(
-        { ok: false, error: "Not authenticated" },
-        { status: 401 }
-      );
-    }
-
-    await connectToMongo();
-
-    const user = await User.findById(userId).lean();
-    if (!user) {
-      return NextResponse.json(
-        { ok: false, error: "User not found" },
-        { status: 404 }
-      );
-    }
-
-    // Transform to safe JSON (excludes password, passwordVersion, __v)
-    const userData = {
-      id: String(user._id),
-      email: user.email,
-      fullName: user.fullName,
-      phone: user.phone || null,
-      profilePhoto: user.profilePhoto || null,
-      addresses: user.addresses || [],
-      joinedDate: user.joinedDate,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
-    };
-
-    return NextResponse.json({ ok: true, user: userData });
-  } catch (err) {
-    console.error("[CustomerMe] error:", err);
+export async function GET(request: NextRequest) {
+  const state = await getCustomerSessionState();
+  if (state.status !== 'valid') {
     return NextResponse.json(
-      { ok: false, error: "Failed to fetch user" },
-      { status: 500 }
+      { ok: false, error: state.status === 'database_unavailable' ? 'DATABASE_UNAVAILABLE' : 'UNAUTHENTICATED' },
+      { status: state.status === 'database_unavailable' ? 503 : 401, headers: { 'Cache-Control': 'private, no-store' } },
     );
+  }
+  try {
+    const user = await User.findById(state.accountId)
+      .select('email fullName phone profilePhoto addresses joinedDate createdAt updatedAt isActive')
+      .lean();
+    if (!user || user.isActive === false) return NextResponse.json({ ok: false, error: 'UNAUTHENTICATED' }, { status: 401 });
+    return NextResponse.json({
+      ok: true,
+      user: {
+        id: String(user._id), email: user.email, fullName: user.fullName, phone: user.phone ?? null,
+        profilePhoto: user.profilePhoto ?? null, addresses: user.addresses ?? [], joinedDate: user.joinedDate,
+        createdAt: user.createdAt, updatedAt: user.updatedAt,
+      },
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
+  } catch (error) {
+    logServerError({ route: 'GET /api/auth/me', err: error, requestId: request.headers.get('x-request-id') });
+    return NextResponse.json({ ok: false, error: 'DATABASE_UNAVAILABLE' }, { status: 503 });
   }
 }

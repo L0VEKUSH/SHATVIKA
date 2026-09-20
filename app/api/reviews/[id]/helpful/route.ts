@@ -1,125 +1,66 @@
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
+import crypto from 'node:crypto';
+import mongoose from 'mongoose';
+import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { connectToMongo } from '@/lib/mongoose';
+import { getCustomerSessionState } from '@/lib/customerJwt';
+import { logServerError } from '@/lib/apiError';
+import { distributedRateLimit } from '@/lib/rateLimit';
 import { Review } from '@/models/Review';
-import { verifyCustomerToken } from '@/lib/customerJwt';
-import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
 
-const schema = z.object({
-  helpful: z.boolean(),
-});
+const schema = z.object({ helpful: z.boolean() }).strict();
 
-function getCustomerTokenFromCookies(cookieHeader: string | null) {
-  if (!cookieHeader) return null;
-  const match = cookieHeader.match(/(?:^|;\s*)customer_session=([^;]+)/);
-  return match?.[1] ? decodeURIComponent(match[1]) : null;
-}
-
-function getUserIdFromToken(token: string): string | null {
-  const parts = token.split('.');
-  if (parts.length !== 3) return null;
-  try {
-    const payloadJson = Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
-    const payload = JSON.parse(payloadJson);
-    return typeof payload?.uid === 'string' ? payload.uid : null;
-  } catch {
-    return null;
-  }
-}
-
-function voterKey(req: NextRequest, userId: string | null): string {
-  if (userId) return `user:${userId}`;
-  return `ip:${getClientIp(req)}`;
+function voterKey(accountId: string) {
+  const secret = process.env.CUSTOMER_JWT_SECRET ?? '';
+  return `v1:${crypto.createHmac('sha256', secret).update(`review-voter:${accountId}`).digest('hex')}`;
 }
 
 export async function PUT(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id } = await params;
-
-  const clientIp = getClientIp(req);
-  const rateCheck = checkRateLimit(clientIp, 20, 60 * 1000);
-  if (!rateCheck.allowed) {
+  const state = await getCustomerSessionState();
+  if (state.status !== 'valid') {
     return NextResponse.json(
-      { ok: false, error: 'RATE_LIMITED', details: { retryAfter: rateCheck.retryAfter } },
-      { status: 429, headers: { 'Retry-After': String(rateCheck.retryAfter) } }
+      { ok: false, error: state.status === 'database_unavailable' ? 'DATABASE_UNAVAILABLE' : 'UNAUTHENTICATED' },
+      { status: state.status === 'database_unavailable' ? 503 : 401 },
     );
   }
-
-  let payload: unknown;
-  try {
-    payload = await req.json();
-  } catch {
-    return NextResponse.json({ ok: false, error: 'INVALID_JSON' }, { status: 400 });
-  }
-
-  const parsed = schema.safeParse(payload);
+  const { id } = await params;
+  if (!mongoose.isValidObjectId(id)) return NextResponse.json({ ok: false, error: 'INVALID_REVIEW_ID' }, { status: 400 });
+  const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ ok: false, error: 'VALIDATION_FAILED', details: parsed.error.flatten() }, { status: 400 });
   }
 
   try {
-    await connectToMongo();
-  } catch (err) {
-    console.error('[PUT /api/reviews/:id/helpful] DB connection failed:', err);
-    return NextResponse.json({ ok: false, error: 'DB_UNAVAILABLE' }, { status: 503 });
-  }
-
-  const cookieHeader = req.headers.get('cookie');
-  const customerToken = getCustomerTokenFromCookies(cookieHeader);
-  let userId: string | null = null;
-  if (customerToken && await verifyCustomerToken(customerToken)) {
-    userId = getUserIdFromToken(customerToken);
-  }
-
-  const key = voterKey(req, userId);
-
-  try {
-    const review = await Review.findById(id);
-    if (!review) {
-      return NextResponse.json({ ok: false, error: 'NOT_FOUND' }, { status: 404 });
+    const limited = await distributedRateLimit(`review-helpful:${state.accountId}`, 30, 60);
+    if (!limited.allowed) {
+      return NextResponse.json(
+        { ok: false, error: 'RATE_LIMITED', retryAfter: limited.retryAfter },
+        { status: 429, headers: { 'Retry-After': String(limited.retryAfter ?? 60) } },
+      );
     }
-
-    const voters: string[] = review.helpfulVoters ?? [];
-    const hasVoted = voters.includes(key);
-    const wantHelpful = parsed.data.helpful;
-
-    if (wantHelpful && hasVoted) {
-      return NextResponse.json({
-        ok: true,
-        id,
-        helpfulCount: review.helpfulCount ?? 0,
-        alreadyVoted: true,
-      });
-    }
-
-    if (!wantHelpful && !hasVoted) {
-      return NextResponse.json({
-        ok: true,
-        id,
-        helpfulCount: review.helpfulCount ?? 0,
-      });
-    }
-
-    if (wantHelpful) {
-      review.helpfulCount = Math.max(0, (review.helpfulCount ?? 0) + 1);
-      review.helpfulVoters = [...voters, key];
-    } else {
-      review.helpfulCount = Math.max(0, (review.helpfulCount ?? 0) - 1);
-      review.helpfulVoters = voters.filter(v => v !== key);
-    }
-
-    await review.save();
-
+    const key = voterKey(state.accountId);
+    const desiredVoters = parsed.data.helpful
+      ? { $setUnion: [{ $ifNull: ['$helpfulVoters', []] }, [key]] }
+      : { $setDifference: [{ $ifNull: ['$helpfulVoters', []] }, [key]] };
+    const updated = await Review.findOneAndUpdate(
+      { _id: id, status: 'approved' },
+      [
+        { $set: { helpfulVoters: desiredVoters } },
+        { $set: { helpfulCount: { $size: '$helpfulVoters' } } },
+      ],
+      { returnDocument: 'after', updatePipeline: true },
+    ).select('helpfulCount helpfulVoters').lean();
+    if (!updated) return NextResponse.json({ ok: false, error: 'NOT_FOUND' }, { status: 404 });
     return NextResponse.json({
       ok: true,
       id,
-      helpfulCount: review.helpfulCount ?? 0,
-    });
-  } catch (err) {
-    console.error('[PUT /api/reviews/:id/helpful] Error:', err);
-    return NextResponse.json({ ok: false, error: 'UPDATE_FAILED' }, { status: 500 });
+      helpful: updated.helpfulVoters?.includes(key) ?? false,
+      helpfulCount: Number(updated.helpfulCount ?? 0),
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
+  } catch (error) {
+    logServerError({ route: 'PUT /api/reviews/:id/helpful', err: error, requestId: request.headers.get('x-request-id') });
+    return NextResponse.json({ ok: false, error: 'REVIEW_UPDATE_FAILED' }, { status: 500 });
   }
 }

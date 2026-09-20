@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ChevronLeft, ChevronRight } from 'lucide-react';
 import Image from 'next/image';
+import { apiRequest } from '@/lib/apiClient';
 
 interface GalleryItem {
   id: string;
@@ -240,20 +241,20 @@ export default function Gallery() {
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [filteredItems, setFilteredItems] = useState<GalleryItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [lightboxItem, setLightboxItem] = useState<GalleryItem | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
 
-  useEffect(() => {
-    async function loadGallery() {
+  const loadGallery = useCallback(async () => {
       try {
-        const res = await fetch('/api/gallery');
-        if (!res.ok) throw new Error('Failed to load gallery');
-        const data = await res.json();
+        setLoading(true);
+        setError(null);
+        const data = await apiRequest<{ items?: Array<{ id: string; title?: string; description?: string; category?: string; imageUrl: string; imageType?: 'image' | 'video' | 'youtube'; youtubeId?: string; featured?: boolean }> }>('/api/gallery');
 
         const realItems = (data.items || [])
-          .map((item: { id?: string; _id?: { toString: () => string }; title?: string; description?: string; category?: string; imageUrl: string; imageType?: 'image' | 'video' | 'youtube'; youtubeId?: string; featured?: boolean }) => ({
-            id: item.id || item._id?.toString(),
+          .map((item) => ({
+            id: item.id,
             title: item.title || '',
             description: item.description || '',
             category: item.category || 'Food',
@@ -268,13 +269,15 @@ export default function Gallery() {
       } catch (err) {
         setItems([]);
         setFilteredItems([]);
+        setError(err instanceof Error ? err.message : 'Gallery is temporarily unavailable.');
       } finally {
         setLoading(false);
       }
-    }
-
-    loadGallery();
   }, []);
+
+  useEffect(() => {
+    void loadGallery();
+  }, [loadGallery]);
 
   useEffect(() => {
     if (selectedCategory === 'All') {
@@ -386,6 +389,13 @@ export default function Gallery() {
           <div className="glass rounded-3xl border border-white/8 p-10 text-center">
             <p className="text-gray-400 text-sm">Loading gallery…</p>
           </div>
+        ) : error ? (
+          <div role="alert" className="glass rounded-3xl border border-red-400/20 p-10 text-center">
+            <p className="text-sm text-red-200">Gallery media could not be loaded.</p>
+            <button type="button" onClick={() => void loadGallery()} className="mt-3 text-sm font-bold text-[#FF8C00] underline underline-offset-2">
+              Try again
+            </button>
+          </div>
         ) : filteredItems.length > 0 ? (
           <motion.div
             className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"
@@ -409,9 +419,9 @@ export default function Gallery() {
         ) : (
           <div className="glass rounded-3xl border border-white/8 p-10 text-center">
             <p className="text-4xl mb-3">📸</p>
-            <h3 className="text-xl font-black text-white mb-2">Fresh moments are on the way</h3>
+            <h3 className="text-xl font-black text-white mb-2">No gallery media published</h3>
             <p className="text-gray-400 text-sm max-w-xl mx-auto">
-              New photos and stories from SHATVIKA CORNER will appear here as soon as they are shared.
+              No approved gallery images or videos are currently available.
             </p>
           </div>
         )}

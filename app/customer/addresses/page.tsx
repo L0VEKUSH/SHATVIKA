@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 import { validatePhone } from '@/lib/validators';
+import { apiRequest } from '@/lib/apiClient';
 
 interface Address {
   _id?: string;
@@ -42,13 +43,10 @@ export default function AddressesPage() {
     const loadAddresses = async () => {
       try {
         setIsLoadingAddresses(true);
-        const res = await fetch('/api/user/addresses', { credentials: 'include' });
-        if (res.ok) {
-          const data = await res.json();
-          setAddresses(data.addresses || []);
-        }
+        const data = await apiRequest<{ addresses?: Address[] }>('/api/user/addresses');
+        setAddresses(data.addresses || []);
       } catch (err) {
-        console.error('Failed to load addresses:', err);
+        setApiError(err instanceof Error ? err.message : 'Failed to load addresses');
       } finally {
         setIsLoadingAddresses(false);
       }
@@ -100,22 +98,13 @@ export default function AddressesPage() {
       const method = editingId ? 'PUT' : 'POST';
       const url = editingId ? `/api/user/addresses/${editingId}` : '/api/user/addresses';
 
-      const res = await fetch(url, {
+      const data = await apiRequest<{ addresses?: Address[] }>(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: {
           ...formData,
           phone: formData.phone.replace(/\D/g, ''),
-        }),
-        credentials: 'include',
+        },
       });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Failed to save address');
-      }
-
-      const data = await res.json();
       setAddresses(data.addresses || []);
       setSuccess(editingId ? 'Address updated!' : 'Address added!');
       resetForm();
@@ -147,17 +136,10 @@ export default function AddressesPage() {
 
     try {
       setApiError(null);
-      const res = await fetch(`/api/user/addresses/${id}`, {
+      const data = await apiRequest<{ addresses?: Address[] }>(`/api/user/addresses/${id}`, {
         method: 'DELETE',
-        credentials: 'include',
       });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Failed to delete address');
-      }
-
-      setAddresses(addresses.filter(a => a._id !== id));
+      setAddresses(data.addresses ?? addresses.filter(a => a._id !== id));
       setSuccess('Address deleted!');
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
@@ -169,24 +151,13 @@ export default function AddressesPage() {
   const handleSetDefault = async (id: string) => {
     try {
       setApiError(null);
-      const res = await fetch(`/api/user/addresses/${id}`, {
+      const data = await apiRequest<{ addresses?: Address[] }>(`/api/user/addresses/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isDefault: true }),
-        credentials: 'include',
+        body: { isDefault: true },
       });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Failed to set default');
-      }
-
-      setAddresses(prev =>
-        prev.map(a => ({
-          ...a,
-          isDefault: a._id === id,
-        }))
-      );
+      setAddresses(data.addresses ?? addresses.map(a =>
+        ({ ...a, isDefault: a._id === id })
+      ));
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to set default';
       setApiError(message);

@@ -1,6 +1,7 @@
 import type { MetadataRoute } from 'next';
+import { getSiteUrl } from '@/lib/siteConfig';
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://shatvikcorner.in';
+const siteUrl = getSiteUrl().origin;
 
 export default function sitemap(): MetadataRoute.Sitemap {
   return [
@@ -9,6 +10,11 @@ export default function sitemap(): MetadataRoute.Sitemap {
       lastModified: new Date(),
       changeFrequency: 'weekly',
       priority: 1,
+    },
+    {
+      url: `${siteUrl}/policies`,
+      changeFrequency: 'monthly',
+      priority: 0.4,
     },
   ];
 }

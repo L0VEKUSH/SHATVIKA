@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Plus, Edit, Trash2, ChevronUp, ChevronDown, Check, AlertTriangle, Upload } from 'lucide-react';
 import Image from 'next/image';
+import { apiRequest } from '@/lib/apiClient';
 
 interface GalleryItem {
   id: string;
@@ -26,6 +27,7 @@ interface FormData {
   imageType: 'image' | 'video' | 'youtube';
   youtubeId: string;
   featured: boolean;
+  mediaAssetId: string | null;
 }
 
 const CATEGORIES = ['Food', 'Restaurant', 'Team', 'Events'];
@@ -38,6 +40,7 @@ const emptyForm: FormData = {
   imageType: 'image',
   youtubeId: '',
   featured: false,
+  mediaAssetId: null,
 };
 
 export default function AdminGalleryPage() {
@@ -56,9 +59,7 @@ export default function AdminGalleryPage() {
     try {
       setLoading(true);
       setError('');
-      const res = await fetch('/api/gallery');
-      if (!res.ok) throw new Error('Failed to fetch');
-      const data = await res.json();
+      const data = await apiRequest<{ items?: GalleryItem[] }>('/api/gallery');
       setItems(data.items || []);
     } catch (err) {
       setError(`Failed to load: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -76,13 +77,15 @@ export default function AdminGalleryPage() {
     try {
       const body = new FormData();
       body.append('file', file);
-      const res = await fetch('/api/upload', { method: 'POST', body });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      const data = await apiRequest<{ imageUrl: string; mediaType: 'image' | 'video'; assetId: string }>(
+        '/api/upload?scope=admin-gallery',
+        { method: 'POST', body },
+      );
       setFormData(prev => ({
         ...prev,
         imageUrl: data.imageUrl,
         imageType: data.mediaType === 'video' ? 'video' : 'image',
+        mediaAssetId: data.assetId,
       }));
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Upload failed');
@@ -99,14 +102,10 @@ export default function AdminGalleryPage() {
       const method = editing ? 'PUT' : 'POST';
       const url = editing ? `/api/gallery?id=${encodeURIComponent(editing.id)}` : '/api/gallery';
 
-      const res = await fetch(url, {
+      await apiRequest(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(formData),
+        body: { ...formData },
       });
-
-      if (!res.ok) throw new Error('Failed to save');
 
       await fetchItems();
       setShowModal(false);
@@ -128,6 +127,7 @@ export default function AdminGalleryPage() {
       imageType: item.imageType,
       youtubeId: item.youtubeId || '',
       featured: item.featured,
+      mediaAssetId: null,
     });
     setEditing(item);
     setShowModal(true);
@@ -136,11 +136,9 @@ export default function AdminGalleryPage() {
   const handleDelete = async (id: string) => {
     setActionLoading(id);
     try {
-      const res = await fetch(`/api/gallery?id=${encodeURIComponent(id)}`, {
+      await apiRequest(`/api/gallery?id=${encodeURIComponent(id)}`, {
         method: 'DELETE',
-        credentials: 'include',
       });
-      if (!res.ok) throw new Error('Delete failed');
       await fetchItems();
       setDeleteConfirm(null);
     } catch (err) {
@@ -166,13 +164,10 @@ export default function AdminGalleryPage() {
     try {
       setActionLoading(`reorder-${id}`);
       const reorderData = newItems.map((item, i) => ({ id: item.id, order: i }));
-      const res = await fetch('/api/gallery', {
+      await apiRequest('/api/gallery', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ items: reorderData }),
+        body: { items: reorderData },
       });
-      if (!res.ok) throw new Error('Failed to reorder');
       setItems(newItems);
     } catch (err) {
       alert(`Error: ${err instanceof Error ? err.message : 'Failed to reorder'}`);
@@ -184,13 +179,10 @@ export default function AdminGalleryPage() {
   const handleToggleFeatured = async (item: GalleryItem) => {
     try {
       setActionLoading(`featured-${item.id}`);
-      const res = await fetch(`/api/gallery?id=${encodeURIComponent(item.id)}`, {
+      await apiRequest(`/api/gallery?id=${encodeURIComponent(item.id)}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ featured: !item.featured }),
+        body: { featured: !item.featured },
       });
-      if (!res.ok) throw new Error('Update failed');
       await fetchItems();
     } catch (err) {
       alert(`Error: ${err instanceof Error ? err.message : 'Failed to update'}`);
@@ -328,7 +320,12 @@ export default function AdminGalleryPage() {
                 <div className="flex gap-4">
                   {(['image', 'video', 'youtube'] as const).map(type => (
                     <label key={type} className="flex items-center gap-2 cursor-pointer capitalize text-sm text-gray-300">
-                      <input type="radio" name="imageType" value={type} checked={formData.imageType === type} onChange={() => setFormData({ ...formData, imageType: type })} />
+                      <input type="radio" name="imageType" value={type} checked={formData.imageType === type} onChange={() => setFormData({
+                        ...formData,
+                        imageType: type,
+                        mediaAssetId: type === 'youtube' ? null : formData.mediaAssetId,
+                        youtubeId: type === 'youtube' ? formData.youtubeId : '',
+                      })} />
                       {type}
                     </label>
                   ))}
@@ -343,7 +340,10 @@ export default function AdminGalleryPage() {
                     {uploading ? 'Uploading…' : 'Upload File'}
                   </button>
                 </div>
-                <input type="text" value={formData.imageUrl} onChange={e => setFormData({ ...formData, imageUrl: e.target.value })} placeholder="/uploads/... or https://..." required className="admin-input w-full" />
+                <input type="text" value={formData.imageUrl} onChange={e => setFormData({ ...formData, imageUrl: e.target.value, mediaAssetId: null })} placeholder="Upload a durable file, or use an HTTPS thumbnail for YouTube" required className="admin-input w-full" />
+                {formData.imageType !== 'youtube' && !formData.mediaAssetId && !editing && (
+                  <p className="mt-2 text-xs text-amber-300">New image/video entries require a successful durable upload. Manual URLs are not accepted as verified assets.</p>
+                )}
               </div>
               {formData.imageType === 'youtube' && (
                 <div>

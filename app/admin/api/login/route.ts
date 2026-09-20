@@ -1,62 +1,78 @@
-import { NextResponse } from 'next/server';
 import bcrypt from 'bcrypt';
-import { Admin } from '@/models/Admin';
-import { connectToMongo } from '@/lib/mongoose';
+import { NextResponse } from 'next/server';
+import { logServerError } from '@/lib/apiError';
 import { setAdminSessionForAdmin } from '@/lib/adminAuth';
-import { rateLimit } from '@/lib/rateLimit';
+import { adminSessionConfigurationError } from '@/lib/adminJwt';
+import { connectToMongo } from '@/lib/mongoose';
+import { authRateLimit } from '@/lib/authRateLimit';
+import { validateEmail } from '@/lib/validators';
+import { Admin } from '@/models/Admin';
 
-// Fake bcrypt hash for timing-safe comparison when admin not found.
-// This is a valid bcrypt hash that will always return false on compare().
-const FAKE_HASH = '$2b$10$fakehashfakehashfakehashfakehashfakehashfakehashfakehash';
+const FAKE_HASH = '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi.';
 
-function normalizeEmail(email: unknown) {
-  return String(email ?? '').trim().toLowerCase();
-}
-
-export async function POST(req: Request) {
+export async function POST(request: Request) {
+  const body = await request.json().catch(() => null);
+  if (!body || typeof body !== 'object') {
+    return NextResponse.json({ ok: false, error: 'INVALID_JSON' }, { status: 400 });
+  }
+  const input = body as Record<string, unknown>;
+  const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
+  const password = typeof input.password === 'string' ? input.password : '';
+  if (!validateEmail(email).valid || !password || password.length > 128) {
+    return NextResponse.json({ ok: false, error: 'INVALID_CREDENTIALS', message: 'Invalid credentials' }, { status: 401 });
+  }
   try {
-    // Rate limit: 5 login attempts per minute per IP
-    const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown';
-    const rateLimitResult = await rateLimit(`admin-login:${ip}`, 5, 60);
-    if (!rateLimitResult.allowed) {
-      return NextResponse.json({ ok: false, message: 'Too many login attempts. Please try again later.' }, { status: 429 });
+    const limit = await authRateLimit({ request, scope: 'admin-login', subject: email, limit: 5, windowSeconds: 60 });
+    if (!limit.allowed) {
+      return NextResponse.json(
+        { ok: false, error: 'RATE_LIMITED', message: 'Too many login attempts. Try again later.' },
+        { status: 429, headers: { 'Retry-After': String(limit.retryAfter ?? 60) } },
+      );
     }
+  } catch {
+    return NextResponse.json({ ok: false, error: 'RATE_LIMIT_UNAVAILABLE', message: 'Admin sign in is temporarily unavailable.' }, { status: 503 });
+  }
+  const sessionConfigurationError = adminSessionConfigurationError();
+  if (sessionConfigurationError) {
+    console.error(JSON.stringify({
+      level: 'error',
+      event: 'auth_configuration_unavailable',
+      route: 'POST /admin/api/login',
+      reason: sessionConfigurationError.includes('not configured') ? 'missing' : 'invalid',
+    }));
+    return NextResponse.json(
+      { ok: false, error: 'AUTH_CONFIGURATION_UNAVAILABLE', message: 'Admin sign in is temporarily unavailable.' },
+      { status: 503 },
+    );
+  }
 
-    const body = await req.json().catch(() => null);
-    const emailRaw = body?.email;
-    const passwordRaw = body?.password;
-
-    const email = normalizeEmail(emailRaw);
-    const password = String(passwordRaw ?? '');
-
-    if (!email || !password) {
-      return NextResponse.json({ ok: false, message: 'email and password are required' }, { status: 400 });
-    }
-
+  try {
     await connectToMongo();
+  } catch (error) {
+    logServerError({ route: 'POST /admin/api/login', err: error, requestId: request.headers.get('x-request-id') });
+    return NextResponse.json(
+      { ok: false, error: 'DB_UNAVAILABLE', message: 'Admin sign in is temporarily unavailable.' },
+      { status: 503 },
+    );
+  }
 
-    // Query using normalized email (already normalized above)
-    const admin = await Admin.findOne({ email }).lean();
-
-    // For timing-safe comparison: use fake hash if admin not found
-    const passwordHash = admin?.password ?? FAKE_HASH;
-
-    // Always perform comparison, even if admin doesn't exist
-    // This prevents timing attacks that leak whether the email exists
-    const passwordOk = await bcrypt.compare(password, passwordHash);
-
-    if (!admin || !passwordOk) {
-      return NextResponse.json({ ok: false, message: 'Invalid credentials' }, { status: 401 });
+  try {
+    const admin = await Admin.findOne({ email })
+      .select('+password +passwordVersion isActive role permissions')
+      .lean();
+    const passwordHash = typeof admin?.password === 'string' ? admin.password : FAKE_HASH;
+    const passwordMatches = await bcrypt.compare(password, passwordHash);
+    if (!admin || admin.isActive === false || admin.role !== 'admin' || !passwordMatches) {
+      return NextResponse.json({ ok: false, error: 'INVALID_CREDENTIALS', message: 'Invalid credentials' }, { status: 401 });
     }
 
-    // JWT cookie based on admin id and full admin data
     await setAdminSessionForAdmin(String(admin._id), admin);
     return NextResponse.json({ ok: true });
-  } catch (err) {
-    console.error('[AdminLogin] error:', err);
-    return NextResponse.json({ ok: false, message: 'Invalid request' }, { status: 400 });
+  } catch (error) {
+    logServerError({ route: 'POST /admin/api/login', err: error, requestId: request.headers.get('x-request-id') });
+    return NextResponse.json(
+      { ok: false, error: 'AUTH_UNAVAILABLE', message: 'Admin sign in is temporarily unavailable.' },
+      { status: 503 },
+    );
   }
 }
-
-
-

@@ -1,153 +1,83 @@
 import { NextResponse } from 'next/server';
-import bcrypt from 'bcrypt';
+import { z } from 'zod';
+import { logServerError } from '@/lib/apiError';
+import { PRIVATE_NO_STORE_HEADERS, requireCurrentCustomer } from '@/lib/customerRouteAuth';
 import { User } from '@/models/User';
-import { connectToMongo } from '@/lib/mongoose';
-import { getCustomerId, isCustomerAuthed } from '@/lib/customerAuth';
-import { validateFullName, validatePhone } from '@/lib/validators';
 
-export async function GET() {
+export const dynamic = 'force-dynamic';
+
+const profileSchema = z.object({
+  fullName: z.string().trim().min(2).max(100).optional(),
+  phone: z.string().trim().regex(/^\d{10,15}$/).optional(),
+  profilePhoto: z.union([
+    z.literal(''),
+    z.string().trim().url().max(2_048).refine((value) => new URL(value).protocol === 'https:', 'HTTPS is required'),
+  ]).optional(),
+}).strict().refine((value) => Object.keys(value).length > 0, 'At least one supported field is required');
+
+function publicUser(user: Record<string, unknown>) {
+  return {
+    id: String(user._id),
+    email: user.email,
+    fullName: user.fullName,
+    phone: user.phone || null,
+    profilePhoto: user.profilePhoto || null,
+    addresses: user.addresses || [],
+    joinedDate: user.joinedDate,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
+}
+
+export async function GET(request: Request) {
+  const auth = await requireCurrentCustomer();
+  if (!auth.ok) return auth.response;
+
   try {
-    const isAuthed = await isCustomerAuthed();
-    if (!isAuthed) {
-      return NextResponse.json(
-        { ok: false, error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
-
-    const userId = await getCustomerId();
-    if (!userId) {
-      return NextResponse.json(
-        { ok: false, error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
-
-    await connectToMongo();
-
-    const user = await User.findById(userId).lean();
+    const user = await User.findOne({ _id: auth.accountId, isActive: { $ne: false } })
+      .select('_id email fullName phone profilePhoto addresses joinedDate createdAt updatedAt')
+      .lean() as Record<string, unknown> | null;
     if (!user) {
-      return NextResponse.json(
-        { ok: false, error: 'User not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ ok: false, error: 'ACCOUNT_NOT_FOUND' }, { status: 404, headers: PRIVATE_NO_STORE_HEADERS });
     }
-
-    const userData = {
-      id: String(user._id),
-      email: user.email,
-      fullName: user.fullName,
-      phone: user.phone || null,
-      profilePhoto: user.profilePhoto || null,
-      addresses: user.addresses || [],
-      joinedDate: user.joinedDate,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
-    };
-
-    return NextResponse.json({ ok: true, user: userData });
-  } catch (err) {
-    console.error('[UserProfile GET] error:', err);
-    return NextResponse.json(
-      { ok: false, error: 'Failed to fetch profile' },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: true, user: publicUser(user) }, { headers: PRIVATE_NO_STORE_HEADERS });
+  } catch (error) {
+    logServerError({ route: 'GET /api/user/profile', err: error, requestId: request.headers.get('x-request-id') });
+    return NextResponse.json({ ok: false, error: 'DATABASE_UNAVAILABLE' }, { status: 503, headers: PRIVATE_NO_STORE_HEADERS });
   }
 }
 
-export async function PUT(req: Request) {
-  try {
-    const isAuthed = await isCustomerAuthed();
-    if (!isAuthed) {
-      return NextResponse.json(
-        { ok: false, error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
+export async function PUT(request: Request) {
+  const auth = await requireCurrentCustomer();
+  if (!auth.ok) return auth.response;
 
-    const userId = await getCustomerId();
-    if (!userId) {
-      return NextResponse.json(
-        { ok: false, error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
-
-    const body = await req.json().catch(() => null);
-    if (!body || typeof body !== 'object') {
-      return NextResponse.json(
-        { ok: false, error: 'Invalid request body' },
-        { status: 400 }
-      );
-    }
-
-    const { fullName, phone, profilePhoto } = body;
-    const updates: Record<string, any> = {};
-
-    // Validate and add fullName if provided
-    if (fullName !== undefined) {
-      const validation = validateFullName(fullName);
-      if (!validation.valid) {
-        return NextResponse.json(
-          { ok: false, error: validation.error },
-          { status: 400 }
-        );
-      }
-      updates.fullName = fullName.trim();
-    }
-
-    // Validate and add phone if provided
-    if (phone !== undefined) {
-      const validation = validatePhone(phone);
-      if (!validation.valid) {
-        return NextResponse.json(
-          { ok: false, error: validation.error },
-          { status: 400 }
-        );
-      }
-      updates.phone = phone.replace(/\D/g, '');
-    }
-
-    // Add profilePhoto if provided (URL validation is minimal)
-    if (profilePhoto !== undefined && typeof profilePhoto === 'string') {
-      updates.profilePhoto = profilePhoto;
-    }
-
-    if (Object.keys(updates).length === 0) {
-      return NextResponse.json(
-        { ok: false, error: 'No fields to update' },
-        { status: 400 }
-      );
-    }
-
-    await connectToMongo();
-
-    const user = await User.findByIdAndUpdate(userId, updates, { new: true }).lean();
-    if (!user) {
-      return NextResponse.json(
-        { ok: false, error: 'User not found' },
-        { status: 404 }
-      );
-    }
-
-    const userData = {
-      id: String(user._id),
-      email: user.email,
-      fullName: user.fullName,
-      phone: user.phone || null,
-      profilePhoto: user.profilePhoto || null,
-      addresses: user.addresses || [],
-      joinedDate: user.joinedDate,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
-    };
-
-    return NextResponse.json({ ok: true, user: userData });
-  } catch (err) {
-    console.error('[UserProfile PUT] error:', err);
+  const contentType = request.headers.get('content-type') ?? '';
+  if (!contentType.toLowerCase().startsWith('application/json')) {
+    return NextResponse.json({ ok: false, error: 'UNSUPPORTED_MEDIA_TYPE' }, { status: 415, headers: PRIVATE_NO_STORE_HEADERS });
+  }
+  const parsed = profileSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) {
     return NextResponse.json(
-      { ok: false, error: 'Failed to update profile' },
-      { status: 500 }
+      { ok: false, error: 'VALIDATION_FAILED', details: parsed.error.flatten() },
+      { status: 400, headers: PRIVATE_NO_STORE_HEADERS },
     );
+  }
+
+  const updates: Record<string, string | null> = { ...parsed.data };
+  if (parsed.data.profilePhoto === '') updates.profilePhoto = null;
+
+  try {
+    const user = await User.findOneAndUpdate(
+      { _id: auth.accountId, isActive: { $ne: false } },
+      { $set: updates },
+      { returnDocument: 'after', runValidators: true },
+    ).select('_id email fullName phone profilePhoto addresses joinedDate createdAt updatedAt').lean() as Record<string, unknown> | null;
+    if (!user) {
+      return NextResponse.json({ ok: false, error: 'ACCOUNT_NOT_FOUND' }, { status: 404, headers: PRIVATE_NO_STORE_HEADERS });
+    }
+    return NextResponse.json({ ok: true, user: publicUser(user) }, { headers: PRIVATE_NO_STORE_HEADERS });
+  } catch (error) {
+    logServerError({ route: 'PUT /api/user/profile', err: error, requestId: request.headers.get('x-request-id') });
+    return NextResponse.json({ ok: false, error: 'PROFILE_UPDATE_FAILED' }, { status: 500, headers: PRIVATE_NO_STORE_HEADERS });
   }
 }

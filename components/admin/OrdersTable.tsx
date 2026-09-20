@@ -5,29 +5,65 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { useAdmin, OrderStatus, Order } from '@/context/AdminContext';
 import { formatINR } from '@/lib/currency';
+import { allowedOrderTransitions, ORDER_STATUSES } from '@/lib/orders/stateMachine';
 
-const STATUS_OPTIONS: OrderStatus[] = ['Pending', 'Cooking', 'Out for Delivery', 'Delivered', 'Cancelled'];
+const STATUS_OPTIONS: readonly OrderStatus[] = ORDER_STATUSES;
+
+const STATUS_LABELS: Record<OrderStatus, string> = {
+  placed: 'Placed',
+  pending: 'Pending',
+  accepted: 'Accepted',
+  preparing: 'Preparing',
+  ready: 'Ready',
+  out_for_delivery: 'Out for delivery',
+  delivered: 'Delivered',
+  served: 'Served',
+  cancelled: 'Cancelled',
+};
 
 const STATUS_STYLES: Record<OrderStatus, string> = {
-  Pending: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/25',
-  Cooking: 'bg-orange-500/15 text-orange-400 border-orange-500/25',
-  'Out for Delivery': 'bg-blue-500/15   text-blue-400   border-blue-500/25',
-  Delivered: 'bg-green-500/15  text-green-400  border-green-500/25',
-  Cancelled: 'bg-red-500/15    text-red-400    border-red-500/25',
+  placed: 'bg-yellow-500/15 text-yellow-300 border-yellow-500/25',
+  pending: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/25',
+  accepted: 'bg-amber-500/15 text-amber-300 border-amber-500/25',
+  preparing: 'bg-orange-500/15 text-orange-400 border-orange-500/25',
+  ready: 'bg-purple-500/15 text-purple-300 border-purple-500/25',
+  out_for_delivery: 'bg-blue-500/15 text-blue-400 border-blue-500/25',
+  delivered: 'bg-green-500/15 text-green-400 border-green-500/25',
+  served: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/25',
+  cancelled: 'bg-red-500/15 text-red-400 border-red-500/25',
 };
 
 const STATUS_EMOJIS: Record<OrderStatus, string> = {
-  Pending: '🕐',
-  Cooking: '👨‍🍳',
-  'Out for Delivery': '🛵',
-  Delivered: '✅',
-  Cancelled: '❌',
+  placed: '🧾',
+  pending: '🕐',
+  accepted: '👍',
+  preparing: '👨‍🍳',
+  ready: '🔔',
+  out_for_delivery: '🛵',
+  delivered: '✅',
+  served: '✅',
+  cancelled: '❌',
 };
 
 function OrderRow({ order }: { order: Order }) {
   const { updateOrderStatus } = useAdmin();
   const [expanded, setExpanded] = useState(false);
   const [selectOpen, setSelectOpen] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const transitions = allowedOrderTransitions(order.status, 'admin');
+
+  const selectStatus = async (status: OrderStatus) => {
+    let reason: string | undefined;
+    if (status === 'cancelled') {
+      const supplied = window.prompt('Record the cancellation reason (required):')?.trim();
+      if (!supplied) return;
+      reason = supplied;
+    }
+    setUpdating(true);
+    setSelectOpen(false);
+    await updateOrderStatus(order.id, status, reason);
+    setUpdating(false);
+  };
 
   return (
     <>
@@ -47,12 +83,15 @@ function OrderRow({ order }: { order: Order }) {
           <div className="relative">
             <button
               onClick={() => setSelectOpen(s => !s)}
+              disabled={updating || transitions.length === 0}
+              aria-haspopup="menu"
+              aria-expanded={selectOpen}
               className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-bold
-                          border transition-all ${STATUS_STYLES[order.status]}`}
+                          border transition-all disabled:cursor-default ${STATUS_STYLES[order.status]}`}
             >
               <span>{STATUS_EMOJIS[order.status]}</span>
-              <span className="hidden sm:inline">{order.status}</span>
-              <ChevronDown className="w-3 h-3" />
+              <span className="hidden sm:inline">{updating ? 'Updating…' : STATUS_LABELS[order.status]}</span>
+              {transitions.length > 0 && <ChevronDown className="w-3 h-3" />}
             </button>
 
             <AnimatePresence>
@@ -63,20 +102,19 @@ function OrderRow({ order }: { order: Order }) {
                   exit={{ opacity: 0, y: 8 }}
                   className="absolute top-full mt-1 left-0 z-20 bg-[#1a1a1a] border border-white/10
                              rounded-xl overflow-hidden shadow-2xl w-48"
+                  role="menu"
                 >
-                  {STATUS_OPTIONS.map(s => (
+                  {transitions.map(s => (
                     <button
                       key={s}
-                      onClick={() => {
-                        updateOrderStatus(order.id, s);
-                        setSelectOpen(false);
-                      }}
+                      onClick={() => void selectStatus(s)}
+                      role="menuitem"
                       className={`flex items-center gap-2 w-full px-3 py-2.5 text-xs font-semibold
                                   hover:bg-white/8 transition-colors text-left ${
                                     order.status === s ? 'text-white' : 'text-gray-400'
                                   }`}
                     >
-                      <span>{STATUS_EMOJIS[s]}</span> {s}
+                      <span>{STATUS_EMOJIS[s]}</span> {STATUS_LABELS[s]}
                     </button>
                   ))}
                 </motion.div>
@@ -181,7 +219,7 @@ export default function OrdersTable({ limit }: { limit?: number }) {
                     : 'bg-white/5 text-gray-400 border-white/10 hover:text-white'
                 }`}
               >
-                {s}
+                {s === 'All' ? s : STATUS_LABELS[s]}
               </button>
             ))}
           </div>
@@ -227,4 +265,3 @@ export default function OrdersTable({ limit }: { limit?: number }) {
     </div>
   );
 }
-

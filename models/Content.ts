@@ -57,6 +57,7 @@ const galleryItemSchema = new Schema(
       index: true,
     },
     imageUrl: { type: String, required: true, trim: true },
+    mediaAssetId: { type: mongoose.Schema.Types.ObjectId, ref: 'MediaAsset', default: null },
     imageType: {
       type: String,
       enum: ['image', 'video', 'youtube'],

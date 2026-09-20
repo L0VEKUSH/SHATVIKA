@@ -1,269 +1,137 @@
+import mongoose from 'mongoose';
 import { NextResponse } from 'next/server';
+import { addressUpdateSchema } from '@/lib/addressValidation';
+import { logServerError } from '@/lib/apiError';
+import {
+  enforceCustomerMutationRateLimit,
+  PRIVATE_NO_STORE_HEADERS,
+  requireCurrentCustomer,
+} from '@/lib/customerRouteAuth';
 import { User } from '@/models/User';
-import { connectToMongo } from '@/lib/mongoose';
-import { getCustomerId, isCustomerAuthed } from '@/lib/customerAuth';
-import { validatePhone } from '@/lib/validators';
+
+export const dynamic = 'force-dynamic';
+
+type MutableAddress = {
+  _id?: { toString(): string };
+  label: string;
+  street: string;
+  city: string;
+  state: string;
+  zipCode: string;
+  phone: string;
+  isDefault: boolean;
+};
+
+async function addressRequestContext(params: Promise<{ id: string }>) {
+  const auth = await requireCurrentCustomer();
+  if (!auth.ok) return auth;
+  const { id } = await params;
+  if (!mongoose.isValidObjectId(id)) {
+    return {
+      ok: false as const,
+      response: NextResponse.json(
+        { ok: false, error: 'INVALID_ADDRESS_ID' },
+        { status: 400, headers: PRIVATE_NO_STORE_HEADERS },
+      ),
+    };
+  }
+  return { ok: true as const, accountId: auth.accountId, addressId: id };
+}
 
 export async function GET(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
 ) {
+  const context = await addressRequestContext(params);
+  if (!context.ok) return context.response;
   try {
-    const { id } = await params;
-    
-    const isAuthed = await isCustomerAuthed();
-    if (!isAuthed) {
-      return NextResponse.json(
-        { ok: false, error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
-
-    const userId = await getCustomerId();
-    if (!userId) {
-      return NextResponse.json(
-        { ok: false, error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
-
-    await connectToMongo();
-
-    const user = await User.findById(userId).lean();
+    const user = await User.findOne({ _id: context.accountId, isActive: { $ne: false } })
+      .select('_id addresses')
+      .lean();
     if (!user) {
-      return NextResponse.json(
-        { ok: false, error: 'User not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ ok: false, error: 'ACCOUNT_NOT_FOUND' }, { status: 404, headers: PRIVATE_NO_STORE_HEADERS });
     }
-
-    const address = user.addresses?.find((addr: any) => String(addr._id) === id);
+    const addresses = (user.addresses ?? []) as unknown as MutableAddress[];
+    const address = addresses.find((entry) => String(entry._id) === context.addressId);
     if (!address) {
-      return NextResponse.json(
-        { ok: false, error: 'Address not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ ok: false, error: 'ADDRESS_NOT_FOUND' }, { status: 404, headers: PRIVATE_NO_STORE_HEADERS });
     }
-
-    return NextResponse.json({ ok: true, address });
-  } catch (err) {
-    console.error('[GetAddress] error:', err);
-    return NextResponse.json(
-      { ok: false, error: 'Failed to fetch address' },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: true, address }, { headers: PRIVATE_NO_STORE_HEADERS });
+  } catch (error) {
+    logServerError({ route: 'GET /api/user/addresses/:id', err: error, requestId: request.headers.get('x-request-id') });
+    return NextResponse.json({ ok: false, error: 'DATABASE_UNAVAILABLE' }, { status: 503, headers: PRIVATE_NO_STORE_HEADERS });
   }
 }
 
 export async function PUT(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  try {
-    const { id } = await params;
-    
-    const isAuthed = await isCustomerAuthed();
-    if (!isAuthed) {
-      return NextResponse.json(
-        { ok: false, error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
-
-    const userId = await getCustomerId();
-    if (!userId) {
-      return NextResponse.json(
-        { ok: false, error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
-
-    const body = await req.json().catch(() => null);
-    if (!body || typeof body !== 'object') {
-      return NextResponse.json(
-        { ok: false, error: 'Invalid request body' },
-        { status: 400 }
-      );
-    }
-
-    const { label, street, city, state, zipCode, phone, isDefault } = body;
-
-    await connectToMongo();
-
-    const user = await User.findById(userId);
-    if (!user) {
-      return NextResponse.json(
-        { ok: false, error: 'User not found' },
-        { status: 404 }
-      );
-    }
-
-    const address = user.addresses?.find((addr: any) => String(addr._id) === id);
-    if (!address) {
-      return NextResponse.json(
-        { ok: false, error: 'Address not found' },
-        { status: 404 }
-      );
-    }
-
-    // Update fields if provided
-    if (label !== undefined) {
-      if (typeof label !== 'string' || !label.trim()) {
-        return NextResponse.json(
-          { ok: false, error: 'Label must be a non-empty string' },
-          { status: 400 }
-        );
-      }
-      address.label = label.trim();
-    }
-
-    if (street !== undefined) {
-      if (typeof street !== 'string' || !street.trim()) {
-        return NextResponse.json(
-          { ok: false, error: 'Street must be a non-empty string' },
-          { status: 400 }
-        );
-      }
-      address.street = street.trim();
-    }
-
-    if (city !== undefined) {
-      if (typeof city !== 'string' || !city.trim()) {
-        return NextResponse.json(
-          { ok: false, error: 'City must be a non-empty string' },
-          { status: 400 }
-        );
-      }
-      address.city = city.trim();
-    }
-
-    if (state !== undefined) {
-      if (typeof state !== 'string' || !state.trim()) {
-        return NextResponse.json(
-          { ok: false, error: 'State must be a non-empty string' },
-          { status: 400 }
-        );
-      }
-      address.state = state.trim();
-    }
-
-    if (zipCode !== undefined) {
-      if (typeof zipCode !== 'string' || !zipCode.trim()) {
-        return NextResponse.json(
-          { ok: false, error: 'Zip code must be a non-empty string' },
-          { status: 400 }
-        );
-      }
-      address.zipCode = zipCode.trim();
-    }
-
-    if (phone !== undefined) {
-      const phoneVal = validatePhone(phone);
-      if (!phoneVal.valid) {
-        return NextResponse.json(
-          { ok: false, error: phoneVal.error },
-          { status: 400 }
-        );
-      }
-      address.phone = phone.replace(/\D/g, '');
-    }
-
-    if (isDefault !== undefined) {
-      // If setting to default, unset others
-      if (isDefault && user.addresses) {
-        user.addresses.forEach((addr: any) => {
-          if (String(addr._id) !== id) {
-            addr.isDefault = false;
-          }
-        });
-      }
-      address.isDefault = isDefault === true;
-    }
-
-    await user.save();
-
-    return NextResponse.json({ ok: true, address });
-  } catch (err) {
-    console.error('[UpdateAddress] error:', err);
+  const context = await addressRequestContext(params);
+  if (!context.ok) return context.response;
+  const limited = await enforceCustomerMutationRateLimit({ accountId: context.accountId, scope: 'address-write' });
+  if (limited) return limited;
+  if (!(request.headers.get('content-type') ?? '').toLowerCase().startsWith('application/json')) {
+    return NextResponse.json({ ok: false, error: 'UNSUPPORTED_MEDIA_TYPE' }, { status: 415, headers: PRIVATE_NO_STORE_HEADERS });
+  }
+  const parsed = addressUpdateSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) {
     return NextResponse.json(
-      { ok: false, error: 'Failed to update address' },
-      { status: 500 }
+      { ok: false, error: 'VALIDATION_FAILED', details: parsed.error.flatten() },
+      { status: 400, headers: PRIVATE_NO_STORE_HEADERS },
     );
+  }
+
+  try {
+    const user = await User.findOne({ _id: context.accountId, isActive: { $ne: false } }).select('_id addresses');
+    if (!user) {
+      return NextResponse.json({ ok: false, error: 'ACCOUNT_NOT_FOUND' }, { status: 404, headers: PRIVATE_NO_STORE_HEADERS });
+    }
+    const addresses = (user.addresses ?? []) as unknown as MutableAddress[];
+    const address = addresses.find((entry) => String(entry._id) === context.addressId);
+    if (!address) {
+      return NextResponse.json({ ok: false, error: 'ADDRESS_NOT_FOUND' }, { status: 404, headers: PRIVATE_NO_STORE_HEADERS });
+    }
+    if (parsed.data.isDefault === true) {
+      addresses.forEach((entry) => { entry.isDefault = false; });
+    }
+    Object.assign(address, parsed.data);
+    await user.save();
+    return NextResponse.json({ ok: true, address, addresses: user.addresses }, { headers: PRIVATE_NO_STORE_HEADERS });
+  } catch (error) {
+    logServerError({ route: 'PUT /api/user/addresses/:id', err: error, requestId: request.headers.get('x-request-id') });
+    return NextResponse.json({ ok: false, error: 'ADDRESS_UPDATE_FAILED' }, { status: 500, headers: PRIVATE_NO_STORE_HEADERS });
   }
 }
 
 export async function DELETE(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
 ) {
+  const context = await addressRequestContext(params);
+  if (!context.ok) return context.response;
+  const limited = await enforceCustomerMutationRateLimit({ accountId: context.accountId, scope: 'address-write' });
+  if (limited) return limited;
+
   try {
-    const { id } = await params;
-    
-    const isAuthed = await isCustomerAuthed();
-    if (!isAuthed) {
-      return NextResponse.json(
-        { ok: false, error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
-
-    const userId = await getCustomerId();
-    if (!userId) {
-      return NextResponse.json(
-        { ok: false, error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
-
-    await connectToMongo();
-
-    const user = await User.findById(userId);
+    const user = await User.findOne({ _id: context.accountId, isActive: { $ne: false } }).select('_id addresses');
     if (!user) {
-      return NextResponse.json(
-        { ok: false, error: 'User not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ ok: false, error: 'ACCOUNT_NOT_FOUND' }, { status: 404, headers: PRIVATE_NO_STORE_HEADERS });
     }
-
-    if (!user.addresses || user.addresses.length === 0) {
-      return NextResponse.json(
-        { ok: false, error: 'Address not found' },
-        { status: 404 }
-      );
+    const addresses = (user.addresses ?? []) as unknown as MutableAddress[];
+    const index = addresses.findIndex((entry) => String(entry._id) === context.addressId);
+    if (index < 0) {
+      return NextResponse.json({ ok: false, error: 'ADDRESS_NOT_FOUND' }, { status: 404, headers: PRIVATE_NO_STORE_HEADERS });
     }
-
-    const addressIndex = user.addresses.findIndex((addr: any) => String(addr._id) === id);
-    if (addressIndex === -1) {
-      return NextResponse.json(
-        { ok: false, error: 'Address not found' },
-        { status: 404 }
-      );
+    if (addresses.length === 1) {
+      return NextResponse.json({ ok: false, error: 'ONLY_ADDRESS_CANNOT_BE_DELETED' }, { status: 409, headers: PRIVATE_NO_STORE_HEADERS });
     }
-
-    // Don't allow deleting if it's the only address
-    if (user.addresses.length === 1) {
-      return NextResponse.json(
-        { ok: false, error: 'Cannot delete the only address' },
-        { status: 400 }
-      );
-    }
-
-    const wasDefault = user.addresses[addressIndex].isDefault;
-    user.addresses.splice(addressIndex, 1);
-
-    // If deleted address was default, set the first one as default
-    if (wasDefault && user.addresses.length > 0) {
-      user.addresses[0].isDefault = true;
-    }
-
+    const [removed] = addresses.splice(index, 1);
+    if (removed.isDefault && addresses.length > 0) addresses[0].isDefault = true;
     await user.save();
-
-    return NextResponse.json({ ok: true });
-  } catch (err) {
-    console.error('[DeleteAddress] error:', err);
-    return NextResponse.json(
-      { ok: false, error: 'Failed to delete address' },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: true, addresses: user.addresses }, { headers: PRIVATE_NO_STORE_HEADERS });
+  } catch (error) {
+    logServerError({ route: 'DELETE /api/user/addresses/:id', err: error, requestId: request.headers.get('x-request-id') });
+    return NextResponse.json({ ok: false, error: 'ADDRESS_DELETE_FAILED' }, { status: 500, headers: PRIVATE_NO_STORE_HEADERS });
   }
 }

@@ -13,6 +13,7 @@ export interface FormField {
   validation?: (value: string) => { valid: boolean; errors: string[] } | { valid: boolean; error?: string };
   showFeedback?: boolean;
   required?: boolean;
+  autoComplete?: string;
 }
 
 interface AuthFormProps {
@@ -55,7 +56,7 @@ export function AuthForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-5 w-full">
       {error && (
-        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+        <div role="alert" className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
           <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
         </div>
       )}
@@ -83,11 +84,14 @@ export function AuthForm({
               id={field.name}
               name={field.name}
               type={field.type}
+              autoComplete={field.autoComplete}
               placeholder={field.placeholder}
               value={field.value}
               onChange={e => field.onChange ? field.onChange(e.target.value) : handleChange(field.name, e.target.value)}
               onBlur={() => handleBlur(field.name)}
               disabled={isLoading}
+              aria-invalid={Boolean(showError)}
+              aria-describedby={showError ? `${field.name}-error` : undefined}
               className={`w-full px-4 py-2.5 rounded-lg border transition-colors
                 ${
                   showError
@@ -111,7 +115,7 @@ export function AuthForm({
             />
 
             {showError && (
-              <p className="mt-1 text-sm text-red-600 dark:text-red-400">{field.error}</p>
+              <p id={`${field.name}-error`} role="alert" className="mt-1 text-sm text-red-600 dark:text-red-400">{field.error}</p>
             )}
 
             {showValidation && validationResult && 'errors' in validationResult && validationResult.errors.length > 0 && (

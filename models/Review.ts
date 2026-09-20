@@ -12,6 +12,7 @@ const reviewSchema = new Schema(
     // Image URLs - imageUrl is the primary single image for backward compatibility
     imageUrl: { type: String, default: null },
     mediaUrls: [{ type: String }], // Array of image/video URLs
+    mediaAssetId: { type: mongoose.Schema.Types.ObjectId, ref: 'MediaAsset', default: null },
 
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', default: null },
@@ -56,6 +57,10 @@ reviewSchema.set('toJSON', {
 reviewSchema.index({ menuItemId: 1, status: 1 });
 reviewSchema.index({ userId: 1 });
 reviewSchema.index({ orderId: 1 });
+reviewSchema.index(
+  { userId: 1, menuItemId: 1 },
+  { unique: true, partialFilterExpression: { userId: { $type: 'objectId' } } },
+);
 
 // Keep model typing simple to avoid mongoose type duplication issues.
 export const Review: Model<any> =

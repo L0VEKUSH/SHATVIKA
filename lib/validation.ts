@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ORDER_STATUSES } from '@/lib/orders/stateMachine';
 
 // Review validation
 export const reviewSubmitSchema = z.object({
@@ -36,18 +37,13 @@ export const menuItemSchema = z.object({
 export const orderSchema = z.object({
   items: z.array(z.object({
     menuItemId: z.string(),
-    variantId: z.string(),
-    quantity: z.number().positive(),
+    variantId: z.string().optional(),
+    quantity: z.number().int().positive(),
   })).min(1),
-  total: z.number().positive(),
-  status: z.enum(['Pending', 'Cooking', 'Ready', 'Out for Delivery', 'Delivered', 'Cancelled']),
-  deliveryAddress: z.object({
-    street: z.string().min(1),
-    city: z.string().min(1),
-    state: z.string().min(1),
-    zipCode: z.string().min(1),
-    phone: z.string().min(10),
-  }).optional(),
+  totalPaise: z.number().int().positive(),
+  status: z.enum(ORDER_STATUSES),
+  fulfillmentType: z.literal('counter').default('counter'),
+  paymentMethod: z.literal('counter').default('counter'),
 });
 
 // Coupon validation

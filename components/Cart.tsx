@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Plus, Minus, Trash2, ShoppingBag, ArrowRight, Heart } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 import { useAdmin } from '@/context/AdminContext';
 import { useAuth } from '@/context/AuthContext';
 import { CartItem, MenuItem } from '@/types';
+import { ApiClientError, apiRequest } from '@/lib/apiClient';
 
 interface CartProps {
   isOpen: boolean;
@@ -15,10 +16,11 @@ interface CartProps {
 }
 
 function CouponApplyUI() {
-  const { appliedCoupon, applyDiscount, clearDiscount, subtotal } = useCart();
+  const { appliedCoupon, applyDiscount, clearDiscount, items } = useCart();
 
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
   const handleApply = async () => {
     const normalized = code.trim().toUpperCase();
@@ -29,30 +31,52 @@ function CouponApplyUI() {
 
     try {
       setError(null);
-      const res = await fetch('/api/coupons/validate', {
+      setPending(true);
+      const data = await apiRequest<{
+        ok: true;
+        coupon: {
+          code: string;
+          discountType: 'percentage' | 'fixed';
+          discountValue: number;
+        };
+        discountPaise: number;
+      }>('/api/coupons/validate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: normalized, subtotal }),
+        body: {
+          code: normalized,
+          items: items.map((item) => ({
+            menuItemId: item.menuItemId,
+            variantId: item.variantId,
+            quantity: item.quantity,
+          })),
+        },
       });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
+      applyDiscount({
+        code: data.coupon.code,
+        discountPaise: data.discountPaise,
+        discountType: data.coupon.discountType,
+        discountValue: data.coupon.discountValue,
+      });
+      setCode('');
+    } catch (requestError) {
+      if (requestError instanceof ApiClientError) {
         const errMap: Record<string, string> = {
           COUPON_NOT_FOUND: 'Invalid coupon code',
           COUPON_INACTIVE: 'This coupon is no longer active',
+          COUPON_NOT_STARTED: 'This coupon is not active yet',
           COUPON_EXPIRED: 'This coupon has expired',
           COUPON_LIMIT_REACHED: 'This coupon has reached its usage limit',
+          COUPON_CUSTOMER_LIMIT_REACHED: 'You have already used this coupon',
+          MINIMUM_ORDER_NOT_MET: 'This basket does not meet the coupon minimum',
+          COUPON_NOT_APPLICABLE: 'This coupon does not apply to these items',
+          UNAUTHENTICATED: 'Sign in before applying a coupon',
         };
-        setError(errMap[data.error] || 'Invalid or inactive coupon');
-        return;
+        setError(errMap[requestError.code] || requestError.message || 'Invalid or inactive coupon');
+      } else {
+        setError('Could not validate coupon. Try again.');
       }
-
-      const discountPercent = data.coupon.discountType === 'percentage'
-        ? data.coupon.discountValue
-        : 0;
-      applyDiscount({ code: data.coupon.code, discountPercent });
-      setCode('');
-    } catch {
-      setError('Could not validate coupon. Try again.');
+    } finally {
+      setPending(false);
     }
   };
 
@@ -73,8 +97,12 @@ function CouponApplyUI() {
             placeholder="Coupon code"
             className="input-flame text-xs font-mono w-full"
           />
-          <button onClick={handleApply} className="btn-flame px-3 py-2 text-xs font-bold whitespace-nowrap">
-            Apply
+          <button
+            onClick={handleApply}
+            disabled={pending || items.length === 0}
+            className="btn-flame px-3 py-2 text-xs font-bold whitespace-nowrap disabled:opacity-50"
+          >
+            {pending ? 'Checking…' : 'Apply'}
           </button>
         </div>
       )}
@@ -83,11 +111,31 @@ function CouponApplyUI() {
   );
 }
 
-function getDefaultAddressId(customer: any) {
-  return customer?.addresses?.find((address: any) => address.isDefault)?._id
-    ?? customer?.addresses?.[0]?._id
-    ?? null;
-}
+type OrderConfirmation = {
+  orderId: string;
+  tokenNumber: string;
+  tokenBusinessDate: string;
+  fulfillmentLocationName: string;
+  totalAmount: number;
+  totalPaise: number;
+  subtotalPaise: number;
+  discountPaise: number;
+  taxPaise: number;
+  deliveryChargePaise: number;
+  items: Array<{
+    menuItemId: string;
+    name: string;
+    variantName?: string;
+    quantity: number;
+    unitPricePaise: number;
+    totalPricePaise: number;
+  }>;
+  createdAt: string;
+  paymentStatus: 'pending' | 'paid' | 'partially_refunded' | 'refunded';
+  orderStatus: string;
+};
+
+const CHECKOUT_RETRY_STORAGE_KEY = 'shatvika-checkout-retry-v1';
 
 export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps) {
   const {
@@ -102,12 +150,18 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
     addToCart,
     toggleWishlist,
     clearDiscount,
+    isCartSyncing,
+    cartPersistenceError,
+    retryCartSync,
   } = useCart();
   const { adminMenuItems } = useAdmin();
   const { customer } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'cart' | 'wishlist'>('cart');
-  const [orderToken, setOrderToken] = useState<{ id: string; total: number; eta: string } | null>(null);
+  const [orderToken, setOrderToken] = useState<OrderConfirmation | null>(null);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [checkoutPending, setCheckoutPending] = useState(false);
+  const checkoutKey = useRef<string | null>(null);
 
   // Sync active tab when cart opens
   useEffect(() => {
@@ -119,70 +173,89 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
     return adminMenuItems.filter((item: MenuItem) => wishlist.includes(item.id));
   }, [wishlist, adminMenuItems]);
 
-  // Apply coupon discount (percentage)
-  const discountAmount = appliedCoupon
-    ? (subtotal * appliedCoupon.discountPercent) / 100
-    : 0;
+  const cartSignature = items
+    .map((item) => `${item.menuItemId}:${item.variantId}:${item.quantity}`)
+    .sort()
+    .join('|');
+  const checkoutSignature = `${cartSignature}|coupon:${appliedCoupon?.code ?? ''}`;
+
+  useEffect(() => {
+    setCheckoutError(null);
+    try {
+      const stored = JSON.parse(window.sessionStorage.getItem(CHECKOUT_RETRY_STORAGE_KEY) ?? 'null') as { signature?: string; key?: string } | null;
+      if (cartSignature && stored?.signature === checkoutSignature && typeof stored.key === 'string' && stored.key.length >= 8) {
+        checkoutKey.current = stored.key;
+      } else {
+        checkoutKey.current = null;
+        window.sessionStorage.removeItem(CHECKOUT_RETRY_STORAGE_KEY);
+      }
+    } catch {
+      checkoutKey.current = null;
+      window.sessionStorage.removeItem(CHECKOUT_RETRY_STORAGE_KEY);
+    }
+  }, [cartSignature, checkoutSignature]);
+
+  // Coupon validation is server-authoritative, but remains provisional until the transaction commits.
+  const discountAmount = appliedCoupon ? appliedCoupon.discountPaise / 100 : 0;
   const subtotalAfterDiscount = Math.max(0, subtotal - discountAmount);
-
-
-  const freeDeliveryThreshold = 0; // ₹1000
-  const standardDeliveryFee = 0; // ₹150
-  const deliveryFee = subtotalAfterDiscount >= freeDeliveryThreshold ? 0 : standardDeliveryFee;
-  const total = subtotalAfterDiscount + deliveryFee;
-
-  // Generate numeric order token between 1 and 2000
-  const generateToken = (): number => {
-    return Math.floor(Math.random() * 2000) + 1; // 1..2000
-  };
 
   const handleCheckout = async () => {
     if (items.length === 0) {
-      alert('Your cart is empty!');
+      setCheckoutError('Your cart is empty.');
       return;
     }
 
-    const deliveryAddressId = getDefaultAddressId(customer);
-    if (!deliveryAddressId) {
-      alert('Please add a delivery address before checking out.');
+    if (!customer) {
+      window.location.assign('/auth/login?returnTo=%2F%3FconfirmOrder%3D1');
       return;
     }
 
     try {
-      const res = await fetch('/api/user/orders', {
+      setCheckoutPending(true);
+      setCheckoutError(null);
+      checkoutKey.current ??= crypto.randomUUID();
+      window.sessionStorage.setItem(CHECKOUT_RETRY_STORAGE_KEY, JSON.stringify({
+        signature: checkoutSignature,
+        key: checkoutKey.current,
+      }));
+      const data = await apiRequest<OrderConfirmation & { ok: true }>('/api/user/orders', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Idempotency-Key': crypto.randomUUID(),
-        },
-        credentials: 'include',
-        body: JSON.stringify({
+        headers: { 'Idempotency-Key': checkoutKey.current },
+        body: {
           items: items.map((item: CartItem) => ({
             menuItemId: item.menuItemId,
             variantId: item.variantId,
             quantity: item.quantity,
           })),
-          deliveryAddressId,
-          paymentMethod: 'cash',
+          fulfillmentType: 'counter',
+          paymentMethod: 'counter',
           couponCode: appliedCoupon?.code,
-        }),
+        },
       });
 
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || 'Checkout failed');
-      }
-
+      window.sessionStorage.removeItem(CHECKOUT_RETRY_STORAGE_KEY);
+      checkoutKey.current = null;
       clearCart();
       clearDiscount();
-      setOrderToken({
-        id: data.orderId,
-        total: data.totalAmount,
-        eta: data.estimatedDeliveryTime,
-      });
+      setOrderToken(data);
       setActiveTab('cart');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Checkout failed');
+      const messages: Record<string, string> = {
+        UNAUTHENTICATED: 'Please sign in before checking out.',
+        CHECKOUT_NOT_CONFIGURED: 'Ordering is temporarily unavailable while the configured tax rule is checked.',
+        TRANSACTION_DATABASE_REQUIRED: 'Ordering is temporarily unavailable because safe stock transactions are not configured.',
+        INSUFFICIENT_STOCK: 'An item just sold out. Your cart was kept; review it and try again.',
+        MENU_ITEM_UNAVAILABLE: 'An item in your cart is no longer available.',
+        VARIANT_UNAVAILABLE: 'A selected option is no longer available.',
+        IDEMPOTENCY_KEY_REUSED: 'The basket changed during checkout. Please try again.',
+      };
+      setCheckoutError(
+        err instanceof ApiClientError
+          ? messages[err.code] || err.message
+          : 'Confirmation may not have completed. Your cart was kept; retry to safely recover the same order.',
+      );
+    } finally {
+      setCheckoutPending(false);
     }
   };
 
@@ -202,61 +275,66 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
             className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50"
           />
           <motion.div
-            initial={{ scale: 0.8, opacity: 0 }}
+            initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.8, opacity: 0 }}
-            className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-sm mx-4"
+            exit={{ scale: 0.9, opacity: 0 }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="counter-confirmation-title"
+            className="fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2"
           >
-            <div className="bg-gradient-to-b from-[#1a1a1a] to-[#0f0f0f] rounded-3xl border border-[#FF4500]/20 p-8 text-center shadow-2xl">
-              <div className="mb-6">
-                <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-500/20 border border-green-500/40 mb-4">
-                  <motion.div
-                    animate={{ scale: [1, 1.2, 1] }}
-                    transition={{ duration: 2, repeat: Infinity }}
-                    className="text-3xl"
-                  >
-                    ✅
-                  </motion.div>
+            <div className="max-h-[92vh] overflow-y-auto rounded-3xl border border-[#FF4500]/20 bg-gradient-to-b from-[#1a1a1a] to-[#0f0f0f] p-5 text-center shadow-2xl sm:p-7">
+              <h2 id="counter-confirmation-title" className="text-2xl font-black text-white">Order confirmed</h2>
+              <p className="mt-1 text-sm text-gray-400">Show this token and pay at the counter</p>
+
+              <div className="my-5 rounded-2xl bg-gradient-to-r from-[#FF4500] to-[#FFD700] p-5">
+                <p className="text-xs font-semibold uppercase text-white/80">Your token number</p>
+                <p className="mt-1 font-mono text-5xl font-black tracking-wider text-white">{orderToken.tokenNumber}</p>
+                <p className="mt-2 text-xs text-white/85">
+                  {new Intl.DateTimeFormat('en-IN', {
+                    dateStyle: 'medium', timeStyle: 'short',
+                    timeZone: process.env.NEXT_PUBLIC_BUSINESS_TIME_ZONE || 'Asia/Kolkata',
+                  }).format(new Date(orderToken.createdAt))}
+                </p>
+              </div>
+
+              <div className="space-y-3 rounded-xl border border-white/10 bg-white/5 p-4 text-left">
+                <div className="flex justify-between gap-3 text-xs">
+                  <span className="text-gray-400">Order ID</span>
+                  <span className="break-all text-right font-mono text-[10px] text-white">{orderToken.orderId}</span>
+                </div>
+                <ul className="space-y-2 border-t border-white/10 pt-3">
+                  {orderToken.items.map(item => (
+                    <li key={`${item.menuItemId}:${item.variantName ?? 'base'}`} className="text-xs">
+                      <div className="flex justify-between gap-3 text-white">
+                        <span>{item.quantity}× {item.name}</span>
+                        <span>₹{(item.totalPricePaise / 100).toFixed(2)}</span>
+                      </div>
+                      <p className="text-[10px] text-gray-500">₹{(item.unitPricePaise / 100).toFixed(2)} each{item.variantName ? ` · ${item.variantName}` : ''}</p>
+                    </li>
+                  ))}
+                </ul>
+                <div className="space-y-1 border-t border-white/10 pt-3 text-xs">
+                  <div className="flex justify-between"><span className="text-gray-400">Subtotal</span><span>₹{(orderToken.subtotalPaise / 100).toFixed(2)}</span></div>
+                  {orderToken.discountPaise > 0 ? <div className="flex justify-between text-emerald-300"><span>Discount</span><span>−₹{(orderToken.discountPaise / 100).toFixed(2)}</span></div> : null}
+                  <div className="flex justify-between"><span className="text-gray-400">Configured tax</span><span>₹{(orderToken.taxPaise / 100).toFixed(2)}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-400">Collection</span><span>{orderToken.fulfillmentLocationName}</span></div>
+                  <div className="flex justify-between pt-1 text-base font-black text-white"><span>Final amount</span><span>₹{orderToken.totalAmount.toFixed(2)}</span></div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 border-t border-white/10 pt-3 text-xs">
+                  <div><span className="block text-gray-500">Payment</span><span className="font-semibold capitalize text-amber-300">{orderToken.paymentStatus === 'pending' ? 'Unpaid — pay at counter' : orderToken.paymentStatus.replaceAll('_', ' ')}</span></div>
+                  <div><span className="block text-gray-500">Order status</span><span className="font-semibold capitalize text-yellow-300">{orderToken.orderStatus}</span></div>
                 </div>
               </div>
 
-              <h2 className="text-2xl font-black text-white mb-2">Order Confirmed!</h2>
-              <p className="text-sm text-gray-400 mb-6">Your delicious meal is being prepared</p>
-
-              <div className="bg-gradient-to-r from-[#FF4500] to-[#FFD700] rounded-2xl p-6 mb-6">
-                <p className="text-xs text-white/70 font-semibold mb-2 uppercase">Your Token Number</p>
-                <p className="text-2xl font-black text-white tracking-wide font-mono">{orderToken.id.slice(-8)}</p>
-              </div>
-
-              <div className="space-y-2 mb-6 text-left bg-white/5 rounded-xl p-4 border border-white/10">
-                <div className="flex justify-between text-xs">
-                  <span className="text-gray-400">Order ID:</span>
-                  <span className="text-white font-mono text-[10px]">{orderToken.id}</span>
-                </div>
-                <div className="flex justify-between text-xs pt-2 border-t border-white/10">
-                  <span className="text-gray-400">Total:</span>
-                  <span className="text-white font-semibold">₹{orderToken.total.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between text-xs pt-2 border-t border-white/10">
-                  <span className="text-gray-400">Status:</span>
-                  <span className="text-yellow-400 font-semibold">🟡 Pending</span>
-                </div>
-              </div>
-
+              <p className="mt-4 text-xs leading-5 text-amber-100">Delivery currently unavailable — collect at Shatvika Corner. Keep this token; it remains available in My Orders.</p>
               <button
-                onClick={() => {
-                  setOrderToken(null);
-                  onClose();
-                }}
-                className="btn-flame w-full py-3 text-sm font-bold"
+                type="button"
+                onClick={() => { setOrderToken(null); onClose(); }}
+                className="btn-flame mt-5 w-full py-3 text-sm font-bold"
               >
-                Close & Continue Shopping
+                Close
               </button>
-
-              <p className="text-[10px] text-gray-500 mt-4">
-                📱 Track your order in My Orders<br />
-                🕐 Estimated delivery: {new Date(orderToken.eta).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </p>
             </div>
           </motion.div>
         </>
@@ -428,21 +506,42 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
                         )}
 
                         <div className="border-t border-white/8 pt-2 flex items-center justify-between">
-                          <span className="text-sm font-bold text-white">Total</span>
-                          <span className="flame-text text-lg font-black">₹{total.toFixed(2)}</span>
+                          <span className="text-sm font-bold text-white">Estimated merchandise total</span>
+                          <span className="flame-text text-lg font-black">₹{subtotalAfterDiscount.toFixed(2)}</span>
                         </div>
+                        <p className="text-[10px] leading-relaxed text-gray-500">
+                          Configured tax, availability and the coupon are recalculated by the server before confirmation. No delivery fee is charged.
+                        </p>
                       </div>
 
-
+                      {checkoutError && (
+                        <p role="alert" className="mb-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                          {checkoutError}
+                        </p>
+                      )}
+                      {cartPersistenceError && (
+                        <div role="alert" className="mb-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                          <p>{cartPersistenceError}</p>
+                          {customer && (
+                            <button type="button" onClick={retryCartSync} className="mt-1 font-bold underline underline-offset-2">
+                              Retry account sync
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {isCartSyncing && customer && (
+                        <p role="status" className="mb-3 text-center text-[10px] text-gray-500">Saving cart to your account…</p>
+                      )}
                       <button
                         onClick={handleCheckout}
-                        className="btn-flame w-full py-4 text-base font-bold flex items-center justify-center gap-2 group"
+                        disabled={checkoutPending}
+                        className="btn-flame w-full py-4 text-base font-bold flex items-center justify-center gap-2 group disabled:opacity-50"
                       >
-                        <span>Proceed to Checkout</span>
+                        <span>{checkoutPending ? 'Confirming safely…' : customer ? 'Confirm order & get token' : 'Sign in to confirm order'}</span>
                         <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                       </button>
 
-                      <p className="text-center text-[10px] text-gray-600 mt-3"></p>
+                      <p className="mt-3 text-center text-[11px] text-amber-200/80">Delivery currently unavailable — collect at Shatvika Corner. Pay at counter by cash or verified UPI.</p>
                     </div>
                   </div>
                 )
@@ -476,12 +575,18 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
 
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-bold text-white truncate">{item.name}</p>
-                          <p className="flame-text text-sm font-black mt-0.5">₹{(item.variants[0]?.price || 0).toFixed(2)}</p>
+                          <p className="flame-text text-sm font-black mt-0.5">₹{(item.variants[0]?.price ?? item.basePrice ?? 0).toFixed(2)}</p>
                         </div>
 
                         <button
                           onClick={() => {
-                            const variant = item.variants[0];
+                            const variant = item.variants[0] ?? {
+                              id: 'base',
+                              name: 'Regular',
+                              price: item.basePrice ?? 0,
+                              pricePaise: item.basePricePaise,
+                              available: item.available !== false,
+                            };
                             if (variant) addToCart(item, variant);
                             setActiveTab('cart');
                           }}
@@ -510,4 +615,3 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
     </AnimatePresence>
   );
 }
-

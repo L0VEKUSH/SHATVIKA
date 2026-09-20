@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { apiRequest } from '@/lib/apiClient';
+import { safeReturnPath } from '@/lib/returnPath';
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -17,19 +19,15 @@ export default function AdminLoginPage() {
     setError(null);
 
     try {
-      const res = await fetch('/admin/api/login', {
+      await apiRequest('/admin/api/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: { email, password },
+        suppressSessionExpiry: true,
       });
-
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        setError(data?.message ?? 'Login failed');
-        return;
-      }
-
-      router.replace('/admin');
+      const returnTo = safeReturnPath(new URLSearchParams(window.location.search).get('returnTo'), '/admin');
+      router.replace(returnTo);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Login failed');
     } finally {
       setSubmitting(false);
     }
@@ -41,12 +39,15 @@ export default function AdminLoginPage() {
         <h1 className="text-2xl font-black text-white">Admin Login</h1>
         <p className="text-sm text-gray-500 mt-2">Sign in to access the admin dashboard.</p>
 
-        {error && <div className="mt-4 text-sm text-red-400">{error}</div>}
+        {error && <div role="alert" className="mt-4 text-sm text-red-400">{error}</div>}
 
         <form onSubmit={onSubmit} className="mt-6 space-y-4">
           <div>
-            <label className="block text-sm font-semibold text-gray-300 mb-2">Email</label>
+            <label htmlFor="admin-email" className="block text-sm font-semibold text-gray-300 mb-2">Email</label>
             <input
+              id="admin-email"
+              name="email"
+              autoComplete="username"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               type="email"
@@ -57,8 +58,11 @@ export default function AdminLoginPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-semibold text-gray-300 mb-2">Password</label>
+            <label htmlFor="admin-password" className="block text-sm font-semibold text-gray-300 mb-2">Password</label>
             <input
+              id="admin-password"
+              name="password"
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               type="password"

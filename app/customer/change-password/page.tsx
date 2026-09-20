@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { ArrowLeft, Lock } from 'lucide-react';
 import { validatePassword } from '@/lib/validators';
+import { apiRequest, clearApiClientSession } from '@/lib/apiClient';
 
 export default function ChangePasswordPage() {
   const { customer, isLoading } = useAuth();
@@ -64,22 +65,15 @@ export default function ChangePasswordPage() {
 
     try {
       setIsSubmitting(true);
-      const res = await fetch('/api/user/change-password', {
+      await apiRequest('/api/user/change-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: formData,
       });
-
-      const data = await res.json().catch(() => null);
-
-      if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || 'Failed to change password');
-      }
-
+      clearApiClientSession();
       setSubmitSuccess(true);
       setFormData({ currentPassword: '', newPassword: '', confirmPassword: '' });
       setTimeout(() => {
-        router.push('/customer/profile');
+        router.replace('/auth/login?passwordChanged=1');
       }, 2000);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Something went wrong');

@@ -1,34 +1,88 @@
 {
-  "name": "shatvika-corner ",
+  "name": "shatvika-corner",
   "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:watch": "vitest",
+    "test:integration": "vitest run tests/integration",
+    "build:production": "next build",
+    "migrate:legacy:dry-run": "tsx scripts/migrate-legacy-records.ts",
+    "migrate:legacy": "tsx scripts/migrate-legacy-records.ts --apply",
+    "admin:repair:dry-run": "tsx scripts/repair-legacy-admin.ts",
+    "admin:repair": "tsx scripts/repair-legacy-admin.ts --apply",
+    "worker:create": "tsx scripts/create-counter-worker.ts",
+    "deps:review": "npm audit --audit-level=moderate",
+    "verify": "npm run typecheck && npm run lint && npm run test:unit && npm run test:integration && npm run deps:review && npm run build:production"
+  },
+  "engines": {
+    "node": ">=24.11 <25",
+    "npm": ">=11 <12"
+  },
+  "packageManager": "npm@11.6.2",
+  "config": {
+    "mongodbMemoryServer": {
+      "disablePostinstall": true
+    }
   },
   "dependencies": {
+    "@expo-google-fonts/noto-sans-devanagari": "0.4.1",
     "bcrypt": "^6.0.0",
     "dotenv": "^17.4.2",
+    "exceljs": "4.4.0",
     "framer-motion": "^11.11.17",
     "isomorphic-dompurify": "^3.19.0",
     "lucide-react": "^0.454.0",
-    "mongoose": "^9.7.4",
-    "next": "15.0.3",
+    "mongoose": "9.10.0",
+    "next": "15.5.25",
+    "pdfmake": "0.2.20",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^20",
+    "@types/node": "^24.0.0",
+    "@types/pdfmake": "^0.2.11",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "autoprefixer": "^10.0.1",
     "eslint": "^8",
-    "eslint-config-next": "15.0.3",
-    "postcss": "^8",
+    "eslint-config-next": "15.5.25",
+    "js-yaml": "4.3.2",
+    "mongodb-memory-server": "^10.2.0",
+    "pdfjs-dist": "6.3.289",
+    "postcss": "8.5.28",
     "tailwindcss": "^3.4.14",
-    "typescript": "^5"
+    "tsx": "^4.20.5",
+    "typescript": "^5",
+    "vitest": "5.0.0"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "8.5.28"
+    },
+    "nanoid": "3.3.19",
+    "dompurify": "3.4.15",
+    "jsdom": {
+      "undici": "7.29.0"
+    },
+    "browserslist": "4.28.9",
+    "baseline-browser-mapping": "2.11.22",
+    "js-yaml": "$js-yaml",
+    "minimatch@3.1.5": {
+      "brace-expansion": "1.1.18"
+    },
+    "minimatch@10.2.5": {
+      "brace-expansion": "5.0.9"
+    },
+    "exceljs": {
+      "uuid": "11.1.1"
+    }
   }
 }

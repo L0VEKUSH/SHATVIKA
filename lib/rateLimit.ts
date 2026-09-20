@@ -1,8 +1,15 @@
+import crypto from 'crypto';
+import { isIP } from 'net';
+import { connectToMongo } from '@/lib/mongoose';
+import { RateLimitBucket } from '@/models/RateLimitBucket';
+
 /**
  * RATE LIMITING MODULE
  *
- * Implements sliding window algorithm with in-memory store.
- * In production, Redis backend provides distributed rate limiting.
+ * The synchronous helper is a bounded, process-local sliding window retained
+ * for low-risk callers and tests. Security-sensitive routes use the
+ * Mongo-backed fixed-window implementation at the bottom of this module so
+ * limits are shared across application instances.
  *
  * Algorithm: Sliding Window Counter
  * - Tracks request timestamps in a sliding window
@@ -17,8 +24,7 @@ interface RequestTimestamp {
 
 // In-memory store for rate limit tracking (sliding window)
 const rateLimitStore: Map<string, RequestTimestamp> = new Map();
-
-
+let lastCleanupAt = 0;
 
 interface RateLimitResult {
   allowed: boolean;
@@ -39,6 +45,12 @@ function slidingWindowCounter(
   windowMs: number
 ): RateLimitResult {
   const now = Date.now();
+  if (now - lastCleanupAt > 60_000) {
+    for (const [storedKey, stored] of rateLimitStore) {
+      if (stored.resetAt <= now) rateLimitStore.delete(storedKey);
+    }
+    lastCleanupAt = now;
+  }
   const windowStart = now - windowMs;
 
   let entry = rateLimitStore.get(key);
@@ -94,23 +106,22 @@ export function checkRateLimit(
  * Handles X-Forwarded-For header (for proxies) and direct connection
  */
 export function getClientIp(request: Request): string {
-  // Check X-Forwarded-For header first (for proxies, CloudFlare, etc.)
-  const forwarded = request.headers.get('x-forwarded-for');
-  if (forwarded) {
-    // Take first IP if multiple are listed
-    return forwarded.split(',')[0].trim();
+  if (process.env.TRUST_CF_CONNECTING_IP === 'true') {
+    const cloudflareIp = request.headers.get('cf-connecting-ip')?.trim() ?? '';
+    if (isIP(cloudflareIp)) return cloudflareIp;
   }
 
-  // Fallback to CF-Connecting-IP (CloudFlare)
-  const cfIp = request.headers.get('cf-connecting-ip');
-  if (cfIp) return cfIp;
+  const trustedHops = Number.parseInt(process.env.TRUSTED_PROXY_HOPS ?? '0', 10);
+  const forwarded = request.headers.get('x-forwarded-for');
+  if (Number.isSafeInteger(trustedHops) && trustedHops > 0 && forwarded) {
+    const chain = forwarded.split(',').map(value => value.trim()).filter(value => isIP(value));
+    const candidate = chain[Math.max(0, chain.length - trustedHops)];
+    if (candidate) return candidate;
+  }
 
-  // Fallback to X-Real-IP
-  const realIp = request.headers.get('x-real-ip');
-  if (realIp) return realIp;
-
-  // Last resort: localhost (for local development)
-  return '127.0.0.1';
+  // Do not trust caller-controlled forwarding headers unless the deployment's
+  // proxy topology is explicitly configured.
+  return process.env.NODE_ENV === 'production' ? 'proxy-ip-unconfigured' : '127.0.0.1';
 }
 
 /**
@@ -123,4 +134,46 @@ export function rateLimit(
   windowSec: number = 60
 ): RateLimitResult {
   return checkRateLimit(key, limit, windowSec * 1000);
+}
+
+/**
+ * Mongo-backed fixed-window limiter shared by every application instance.
+ * Keys are hashed before persistence; the TTL index removes expired buckets.
+ */
+export async function distributedRateLimit(
+  key: string,
+  limit: number = 5,
+  windowSec: number = 60,
+): Promise<RateLimitResult> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || !Number.isSafeInteger(windowSec) || windowSec < 1) {
+    throw new Error('INVALID_RATE_LIMIT_CONFIGURATION');
+  }
+  await connectToMongo();
+  const now = Date.now();
+  const windowMs = windowSec * 1000;
+  const windowId = Math.floor(now / windowMs);
+  const resetAt = (windowId + 1) * windowMs;
+  const keyHash = crypto.createHash('sha256').update(key).digest('hex');
+  const update = {
+    $inc: { count: 1 },
+    $setOnInsert: { expiresAt: new Date(resetAt + 60_000) },
+  };
+  let bucket;
+  try {
+    bucket = await RateLimitBucket.findOneAndUpdate(
+      { keyHash, windowId },
+      update,
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
+    ).lean();
+  } catch (error) {
+    if (!(error && typeof error === 'object' && 'code' in error && error.code === 11000)) throw error;
+    bucket = await RateLimitBucket.findOneAndUpdate({ keyHash, windowId }, update, { returnDocument: 'after' }).lean();
+  }
+  if (!bucket) throw new Error('RATE_LIMIT_BACKEND_UNAVAILABLE');
+  const allowed = bucket.count <= limit;
+  return {
+    allowed,
+    remaining: Math.max(0, limit - bucket.count),
+    retryAfter: allowed ? undefined : Math.max(1, Math.ceil((resetAt - now) / 1000)),
+  };
 }

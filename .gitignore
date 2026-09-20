@@ -57,6 +57,11 @@ coverage/
 # ============================
 uploads/
 uploads/tmp/
+public/uploads/
+tmp/
+temp/
+.reports/
+.mongodb-binaries/
 
 # ============================
 # Misc
@@ -64,6 +69,12 @@ uploads/tmp/
 .cache/
 .turbo/
 .npm/
+.vitest/
+.eslintcache
+.swc/
+.venv/
+playwright-report/
+test-results/
 *.tgz
 npm-debug.log*
 yarn-debug.log*

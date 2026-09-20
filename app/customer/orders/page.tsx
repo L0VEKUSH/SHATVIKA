@@ -1,125 +1,611 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  AlertCircle,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  Clock3,
+  CreditCard,
+  MapPin,
+  Package,
+  RefreshCw,
+} from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
-import { Package } from 'lucide-react';
+import { ApiClientError, apiRequest } from '@/lib/apiClient';
 import { formatINR } from '@/lib/currency';
 
-function statusLabel(status?: string) {
-  switch (status) {
-    case 'pending': return 'Pending';
-    case 'accepted':
-    case 'preparing': return 'Preparing';
-    case 'ready':
-    case 'out_for_delivery': return 'Out for Delivery';
-    case 'delivered': return 'Delivered';
-    case 'cancelled': return 'Cancelled';
-    default: return 'Pending';
+const PAGE_SIZE = 10;
+const BUSINESS_TIME_ZONE = process.env.NEXT_PUBLIC_BUSINESS_TIME_ZONE || 'Asia/Kolkata';
+
+type OrderStatus =
+  | 'placed'
+  | 'pending'
+  | 'accepted'
+  | 'preparing'
+  | 'ready'
+  | 'out_for_delivery'
+  | 'delivered'
+  | 'served'
+  | 'cancelled';
+
+type PaymentStatus = 'pending' | 'paid' | 'failed' | 'partially_refunded' | 'refunded';
+
+type OrderItem = {
+  menuItemId: string;
+  name?: string;
+  quantity: number;
+  unitPrice?: number;
+  unitPricePaise?: number;
+  totalPricePaise?: number;
+  variantName?: string | null;
+  categoryName?: string | null;
+};
+
+type StatusHistoryEntry = {
+  fromStatus?: OrderStatus | null;
+  status: OrderStatus;
+  timestamp: string;
+  actorType?: 'customer' | 'worker' | 'admin' | 'system';
+  reason?: string | null;
+  note?: string | null;
+};
+
+type DeliveryAddress = {
+  label?: string | null;
+  street: string;
+  city: string;
+  state: string;
+  zipCode: string;
+  phone: string;
+};
+
+type CustomerOrder = {
+  id: string;
+  orderNumber: string;
+  tokenNumber?: string | null;
+  tokenBusinessDate?: string | null;
+  fulfillmentType?: 'counter' | 'delivery' | null;
+  fulfillmentLocationName?: string | null;
+  items: OrderItem[];
+  subtotal?: number;
+  discount?: number;
+  tax?: number;
+  deliveryCharge?: number;
+  totalAmount: number;
+  totalPaise?: number;
+  paymentMethod: 'counter' | 'card' | 'upi' | 'wallet' | 'cash';
+  paymentStatus: PaymentStatus;
+  orderStatus: OrderStatus;
+  stateVersion: number;
+  statusHistory?: StatusHistoryEntry[];
+  deliveryAddress?: DeliveryAddress;
+  specialInstructions?: string | null;
+  createdAt: string;
+  estimatedDeliveryTime?: string | null;
+  actualDeliveryTime?: string | null;
+  estimatedReadyTime?: string | null;
+  servedAt?: string | null;
+  servedByName?: string | null;
+  cancellationReason?: string | null;
+  refundDuePaise?: number;
+};
+
+type OrdersResponse = {
+  ok: true;
+  orders: CustomerOrder[];
+  total: number;
+  page: number;
+  pages: number;
+};
+
+const STATUS_LABELS: Record<OrderStatus, string> = {
+  placed: 'Placed',
+  pending: 'Pending',
+  accepted: 'Accepted',
+  preparing: 'Preparing',
+  ready: 'Ready',
+  out_for_delivery: 'Out for delivery',
+  delivered: 'Delivered',
+  served: 'Served',
+  cancelled: 'Cancelled',
+};
+
+const STATUS_STYLES: Record<OrderStatus, string> = {
+  placed: 'border-amber-400/30 bg-amber-400/10 text-amber-300',
+  pending: 'border-amber-400/30 bg-amber-400/10 text-amber-300',
+  accepted: 'border-sky-400/30 bg-sky-400/10 text-sky-300',
+  preparing: 'border-orange-400/30 bg-orange-400/10 text-orange-300',
+  ready: 'border-violet-400/30 bg-violet-400/10 text-violet-300',
+  out_for_delivery: 'border-blue-400/30 bg-blue-400/10 text-blue-300',
+  delivered: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
+  served: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
+  cancelled: 'border-red-400/30 bg-red-400/10 text-red-300',
+};
+
+const PAYMENT_LABELS: Record<PaymentStatus, string> = {
+  pending: 'Payment pending',
+  paid: 'Paid',
+  failed: 'Payment failed',
+  partially_refunded: 'Partially refunded',
+  refunded: 'Refunded',
+};
+
+const PAYMENT_METHOD_LABELS: Record<CustomerOrder['paymentMethod'], string> = {
+  counter: 'Pay at counter',
+  cash: 'Cash at counter',
+  card: 'Card',
+  upi: 'UPI',
+  wallet: 'Wallet',
+};
+
+function statusLabel(status: OrderStatus): string {
+  return STATUS_LABELS[status] ?? 'Status unavailable';
+}
+
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return 'Not recorded';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Not recorded';
+  return new Intl.DateTimeFormat('en-IN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: BUSINESS_TIME_ZONE,
+  }).format(date);
+}
+
+function rupees(paise: number | undefined, legacyRupees: number | undefined): number {
+  if (Number.isSafeInteger(paise) && (paise ?? 0) >= 0) return (paise ?? 0) / 100;
+  return Number.isFinite(legacyRupees) ? Number(legacyRupees) : 0;
+}
+
+function itemTotal(item: OrderItem): number {
+  if (Number.isSafeInteger(item.totalPricePaise) && (item.totalPricePaise ?? 0) >= 0) {
+    return (item.totalPricePaise ?? 0) / 100;
   }
+  return Math.max(0, Number(item.unitPrice ?? 0)) * Math.max(0, Number(item.quantity ?? 0));
+}
+
+function errorMessage(error: unknown): string {
+  if (!(error instanceof ApiClientError)) {
+    return error instanceof Error ? error.message : 'Orders could not be loaded. Please try again.';
+  }
+  const messages: Record<string, string> = {
+    DATABASE_UNAVAILABLE: 'Orders are temporarily unavailable. Please try again.',
+    STALE_ORDER_VERSION: 'This order changed before cancellation. It has been refreshed; please review it again.',
+    INVALID_ORDER_TRANSITION: 'This order is no longer eligible for customer cancellation.',
+    CANCELLATION_FAILED: 'The cancellation could not be completed. No changes were assumed.',
+    TRANSACTION_DATABASE_REQUIRED: 'Cancellation is unavailable until transactional database support is restored.',
+    VALIDATION_FAILED: 'Enter a cancellation reason between 3 and 300 characters.',
+  };
+  return messages[error.code] ?? error.message;
+}
+
+function OrderDetails({ order }: { order: CustomerOrder }) {
+  const history = [...(order.statusHistory ?? [])]
+    .filter((entry) => entry.timestamp && STATUS_LABELS[entry.status])
+    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  const quantity = order.items.reduce((sum, item) => sum + Math.max(0, Number(item.quantity) || 0), 0);
+
+  return (
+    <div id={`order-details-${order.id}`} className="border-t border-white/10 px-4 py-5 sm:px-6">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(16rem,0.8fr)]">
+        <section aria-labelledby={`items-${order.id}`}>
+          <h3 id={`items-${order.id}`} className="text-sm font-bold text-white">
+            Items ({quantity})
+          </h3>
+          <ul className="mt-3 divide-y divide-white/5 rounded-xl border border-white/10 bg-black/10">
+            {order.items.map((item, index) => (
+              <li key={`${item.menuItemId}-${item.variantName ?? 'base'}-${index}`} className="flex gap-3 px-3 py-3 sm:px-4">
+                <span className="flex h-8 min-w-8 items-center justify-center rounded-lg bg-white/5 px-2 text-xs font-bold text-gray-300" aria-label={`${item.quantity} quantity`}>
+                  {item.quantity}×
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="break-words text-sm font-semibold text-white">{item.name?.trim() || 'Historical item'}</p>
+                  <p className="mt-0.5 text-xs text-gray-500">
+                    {[item.variantName, item.categoryName].filter(Boolean).join(' · ') || 'Variant/category not recorded'}
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-sm font-semibold text-gray-200">{formatINR(itemTotal(item))}</p>
+                  <p className="text-[10px] text-gray-500">{formatINR(rupees(item.unitPricePaise, item.unitPrice))} each</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          {order.specialInstructions && (
+            <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.025] p-4">
+              <p className="text-xs font-bold uppercase tracking-wider text-gray-500">Special instructions</p>
+              <p className="mt-1 break-words text-sm text-gray-300">{order.specialInstructions}</p>
+            </div>
+          )}
+        </section>
+
+        <div className="space-y-5">
+          <section aria-labelledby={`totals-${order.id}`} className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
+            <h3 id={`totals-${order.id}`} className="text-sm font-bold text-white">Order totals</h3>
+            <dl className="mt-3 space-y-2 text-sm">
+              <div className="flex justify-between gap-4 text-gray-400"><dt>Merchandise</dt><dd>{formatINR(rupees(undefined, order.subtotal))}</dd></div>
+              <div className="flex justify-between gap-4 text-gray-400"><dt>Discount</dt><dd>−{formatINR(rupees(undefined, order.discount))}</dd></div>
+              <div className="flex justify-between gap-4 text-gray-400"><dt>Tax</dt><dd>{formatINR(rupees(undefined, order.tax))}</dd></div>
+              {order.fulfillmentType === 'counter'
+                ? <div className="flex justify-between gap-4 text-gray-400"><dt>Collection</dt><dd>Counter · no delivery fee</dd></div>
+                : <div className="flex justify-between gap-4 text-gray-400"><dt>Delivery charge</dt><dd>{formatINR(rupees(undefined, order.deliveryCharge))}</dd></div>}
+              <div className="flex justify-between gap-4 border-t border-white/10 pt-2 font-bold text-white"><dt>Total</dt><dd>{formatINR(rupees(order.totalPaise, order.totalAmount))}</dd></div>
+            </dl>
+            {Number.isSafeInteger(order.refundDuePaise) && Number(order.refundDuePaise) > 0 && (
+              <p className="mt-3 rounded-lg bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
+                Refund due recorded: {formatINR(Number(order.refundDuePaise) / 100)}. This does not indicate that the refund has completed.
+              </p>
+            )}
+          </section>
+
+          <section aria-labelledby={`payment-${order.id}`} className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
+            <h3 id={`payment-${order.id}`} className="flex items-center gap-2 text-sm font-bold text-white">
+              <CreditCard className="h-4 w-4 text-[#FF8C00]" aria-hidden="true" /> Payment
+            </h3>
+            <p className="mt-2 text-sm text-gray-300">{PAYMENT_METHOD_LABELS[order.paymentMethod] ?? 'Method not recorded'}</p>
+            <p className="mt-1 text-xs text-gray-500">{PAYMENT_LABELS[order.paymentStatus] ?? 'Status not recorded'}</p>
+          </section>
+
+          <section aria-labelledby={`address-${order.id}`} className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
+            <h3 id={`address-${order.id}`} className="flex items-center gap-2 text-sm font-bold text-white">
+              <MapPin className="h-4 w-4 text-[#FF8C00]" aria-hidden="true" /> {order.fulfillmentType === 'counter' ? 'Counter collection' : 'Delivery address'}
+            </h3>
+            {order.fulfillmentType === 'counter' ? (
+              <div className="mt-2 text-sm leading-6 text-gray-300">
+                <p className="font-semibold text-white">{order.fulfillmentLocationName || 'Shatvika Corner'}</p>
+                <p>Delivery currently unavailable — collect at Shatvika Corner.</p>
+                <p className="mt-2 text-amber-200">Show token {order.tokenNumber || order.orderNumber}, pay at the counter, and collect after it is marked ready.</p>
+                {order.estimatedReadyTime && <p className="mt-1 text-xs text-gray-500">Initial preparation target: {formatDateTime(order.estimatedReadyTime)} (not a guarantee)</p>}
+              </div>
+            ) : order.deliveryAddress ? (
+              <address className="mt-2 break-words text-sm not-italic leading-6 text-gray-300">
+                {order.deliveryAddress.label && <span className="block font-semibold text-gray-200">{order.deliveryAddress.label}</span>}
+                {order.deliveryAddress.street}<br />
+                {order.deliveryAddress.city}, {order.deliveryAddress.state} {order.deliveryAddress.zipCode}<br />
+                <span className="text-gray-500">Phone: {order.deliveryAddress.phone}</span>
+              </address>
+            ) : (
+              <p className="mt-2 text-sm text-gray-500">Historical address not recorded.</p>
+            )}
+          </section>
+        </div>
+      </div>
+
+      <section aria-labelledby={`timeline-${order.id}`} className="mt-6">
+        <h3 id={`timeline-${order.id}`} className="flex items-center gap-2 text-sm font-bold text-white">
+          <Clock3 className="h-4 w-4 text-[#FF8C00]" aria-hidden="true" /> Timestamped timeline
+        </h3>
+        {history.length > 0 ? (
+          <ol className="mt-4 space-y-0">
+            {history.map((entry, index) => (
+              <li key={`${entry.status}-${entry.timestamp}-${index}`} className="relative grid grid-cols-[1.25rem_1fr] gap-3 pb-5 last:pb-0">
+                {index < history.length - 1 && <span className="absolute left-[0.35rem] top-3 h-full w-px bg-white/10" aria-hidden="true" />}
+                <span className="relative mt-1 h-3 w-3 rounded-full border-2 border-[#FF8C00] bg-[#141414]" aria-hidden="true" />
+                <div>
+                  <p className="text-sm font-semibold text-gray-200">{statusLabel(entry.status)}</p>
+                  <p className="text-xs text-gray-500">{formatDateTime(entry.timestamp)} · {entry.actorType === 'admin' ? 'Restaurant admin' : entry.actorType === 'worker' ? 'Counter worker' : entry.actorType === 'customer' ? 'Customer' : 'System'}</p>
+                  {entry.note && <p className="mt-1 break-words text-xs text-gray-400">{entry.note}</p>}
+                  {entry.reason && <p className="mt-1 break-words text-xs text-gray-400">Reason: {entry.reason}</p>}
+                </div>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <div className="mt-3 rounded-xl border border-dashed border-white/10 px-4 py-3 text-sm text-gray-500">
+            No stage timestamps were recorded for this historical order. Order created {formatDateTime(order.createdAt)}.
+          </div>
+        )}
+        {order.actualDeliveryTime && (
+          <p className="mt-3 text-xs text-gray-500">Recorded delivery time: {formatDateTime(order.actualDeliveryTime)}</p>
+        )}
+        {order.servedAt && (
+          <p className="mt-3 text-xs text-gray-500">Collected at counter: {formatDateTime(order.servedAt)}{order.servedByName ? ` · served by ${order.servedByName}` : ''}</p>
+        )}
+      </section>
+    </div>
+  );
 }
 
 export default function OrdersPage() {
-  const { customer, isLoading } = useAuth();
-  const [orders, setOrders] = useState<any[]>([]);
-  const [loadingOrders, setLoadingOrders] = useState(true);
+  const { customer, isLoading: authLoading } = useAuth();
+  const [orders, setOrders] = useState<CustomerOrder[]>([]);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [cancelOrderId, setCancelOrderId] = useState<string | null>(null);
+  const [cancellationReason, setCancellationReason] = useState('');
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const requestSequence = useRef(0);
+
+  const loadOrders = useCallback(async (targetPage: number, initial = false) => {
+    const requestId = ++requestSequence.current;
+    if (initial) setLoading(true);
+    else setRefreshing(true);
+    setError(null);
+
+    try {
+      const data = await apiRequest<OrdersResponse>(`/api/user/orders?page=${targetPage}&limit=${PAGE_SIZE}`, {
+        cache: 'no-store',
+      });
+      if (requestId !== requestSequence.current) return;
+      setOrders(data.orders ?? []);
+      setTotal(data.total ?? 0);
+      setPages(Math.max(1, data.pages ?? 1));
+      setLastRefreshed(new Date());
+      if (targetPage > Math.max(1, data.pages ?? 1)) setPage(Math.max(1, data.pages ?? 1));
+    } catch (caught) {
+      if (requestId !== requestSequence.current) return;
+      setError(errorMessage(caught));
+      if (initial) setOrders([]);
+    } finally {
+      if (requestId === requestSequence.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    }
+  }, []);
 
   useEffect(() => {
-    const fetchOrders = async () => {
-      try {
-        const res = await fetch('/api/user/orders', { credentials: 'include' });
-        if (res.ok) {
-          const data = await res.json();
-          setOrders(data.orders || []);
-        }
-      } catch (err) {
-        console.error('Failed to load orders', err);
-      } finally {
-        setLoadingOrders(false);
-      }
-    };
-    if (customer) fetchOrders();
-  }, [customer]);
+    if (authLoading) return;
+    if (!customer) {
+      requestSequence.current += 1;
+      setOrders([]);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+    void loadOrders(page, true);
+  }, [authLoading, customer, loadOrders, page]);
 
-  if (isLoading || loadingOrders) {
+  async function cancelOrder(event: FormEvent<HTMLFormElement>, order: CustomerOrder) {
+    event.preventDefault();
+    const reason = cancellationReason.trim();
+    if (reason.length < 3 || reason.length > 300 || cancellingId) return;
+
+    setCancellingId(order.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await apiRequest<{ ok: true; order: { id: string; orderStatus: 'cancelled'; stateVersion: number } }>(
+        `/api/user/orders/${encodeURIComponent(order.id)}`,
+        {
+          method: 'DELETE',
+          body: { reason, expectedVersion: order.stateVersion },
+        },
+      );
+      setCancelOrderId(null);
+      setCancellationReason('');
+      setNotice(`Order #${order.orderNumber} was cancelled. Its current payment/refund state is shown in the details.`);
+      await loadOrders(page);
+    } catch (caught) {
+      setError(errorMessage(caught));
+      if (caught instanceof ApiClientError && ['STALE_ORDER_VERSION', 'INVALID_ORDER_TRANSITION'].includes(caught.code)) {
+        await loadOrders(page);
+      }
+    } finally {
+      setCancellingId(null);
+    }
+  }
+
+  if (authLoading || loading) {
     return (
-      <div className="flex-1 flex items-center justify-center p-8">
-        <div className="animate-spin rounded-full h-8 w-8 border-4 border-blue-600 border-t-transparent"></div>
+      <div className="flex min-h-[50vh] flex-1 items-center justify-center p-8" role="status" aria-live="polite">
+        <RefreshCw className="h-8 w-8 animate-spin text-[#FF8C00]" aria-hidden="true" />
+        <span className="sr-only">Loading orders</span>
+      </div>
+    );
+  }
+
+  if (!customer) {
+    return (
+      <div className="mx-auto max-w-xl p-6 text-center sm:p-10">
+        <div className="glass rounded-2xl p-8">
+          <Package className="mx-auto h-12 w-12 text-white/30" aria-hidden="true" />
+          <h1 className="mt-4 text-2xl font-bold text-white">Sign in to view your orders</h1>
+          <p className="mt-2 text-sm text-gray-400">Order history is private to your account.</p>
+          <Link href="/auth/login?returnTo=%2Fcustomer%2Forders" className="btn-flame mt-6 inline-flex px-6 py-3">
+            <span>Sign in</span>
+          </Link>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-          <Package className="w-8 h-8 text-blue-500" />
-          My Orders
-        </h1>
-        <p className="text-sm text-gray-500 mt-1">View and track your recent orders</p>
+    <main className="mx-auto max-w-5xl p-4 sm:p-6 lg:p-8">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="flex items-center gap-2 text-2xl font-black text-white sm:text-3xl">
+            <Package className="h-7 w-7 text-[#FF8C00] sm:h-8 sm:w-8" aria-hidden="true" />
+            My orders
+          </h1>
+          <p className="mt-1 text-sm text-gray-400">Saved order details, payment status, and recorded stage history.</p>
+          {lastRefreshed && <p className="mt-1 text-xs text-gray-600">Last refreshed {formatDateTime(lastRefreshed.toISOString())} ({BUSINESS_TIME_ZONE})</p>}
+        </div>
+        <button
+          type="button"
+          onClick={() => void loadOrders(page)}
+          disabled={refreshing || Boolean(cancellingId)}
+          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-gray-200 transition hover:border-[#FF8C00]/40 hover:bg-white/10 disabled:cursor-wait disabled:opacity-50"
+        >
+          <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
+          {refreshing ? 'Refreshing…' : 'Refresh orders'}
+        </button>
+      </header>
+
+      <div className="mt-5 space-y-3" aria-live="polite">
+        {error && (
+          <div role="alert" className="flex items-start gap-3 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <span className="flex-1">{error}</span>
+            <button type="button" onClick={() => setError(null)} className="shrink-0 underline underline-offset-2">Dismiss</button>
+          </div>
+        )}
+        {notice && (
+          <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm text-emerald-200">
+            {notice}
+          </div>
+        )}
       </div>
 
-      {orders.length === 0 ? (
-        <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 text-center shadow-sm">
-          <Package className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No orders yet</h3>
-          <p className="text-gray-500 mb-6">Looks like you haven&apos;t placed any orders yet.</p>
-          <a href="/menu" className="inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-xl text-white bg-blue-600 hover:bg-blue-700 transition-colors">
-            Explore Menu
-          </a>
-        </div>
+      {!error && orders.length === 0 ? (
+        <section className="glass mt-6 rounded-2xl p-8 text-center sm:p-12">
+          <Package className="mx-auto h-12 w-12 text-white/20" aria-hidden="true" />
+          <h2 className="mt-4 text-lg font-semibold text-white">No orders yet</h2>
+          <p className="mt-2 text-sm text-gray-400">Your completed checkout orders will appear here.</p>
+          <Link href="/#menu" className="btn-flame mt-6 inline-flex px-6 py-3">
+            <span>Explore menu</span>
+          </Link>
+        </section>
       ) : (
-        <div className="space-y-6">
-          {orders.map((order) => (
-            <div key={order.id} className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4 pb-4 border-b border-gray-100 dark:border-gray-700">
-                <div>
-                  <p className="text-sm text-gray-500">Order ID: #{order.orderNumber || order.id?.slice(-8)}</p>
-                  <p className="text-xs text-gray-400 mt-1">{new Date(order.createdAt).toLocaleString()}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                    order.orderStatus === 'pending' || order.orderStatus === 'preparing' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' :
-                    order.orderStatus === 'delivered' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
-                    'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                  }`}>
-                    {statusLabel(order.orderStatus)}
-                  </span>
-                </div>
-              </div>
-              <div className="space-y-3">
-                {order.items?.map((item: any, i: number) => (
-                  <div key={i} className="flex justify-between items-center">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center text-xs font-medium">
-                        {item.quantity}x
+        <section className="mt-6" aria-label="Order history">
+          <p className="mb-3 text-xs text-gray-500">{total} {total === 1 ? 'order' : 'orders'} in your history</p>
+          <div className="space-y-4">
+            {orders.map((order) => {
+              const expanded = expandedId === order.id;
+              const cancelling = cancellingId === order.id;
+              const canCancel = ['placed', 'pending', 'accepted'].includes(order.orderStatus);
+              const quantity = order.items.reduce((sum, item) => sum + Math.max(0, Number(item.quantity) || 0), 0);
+
+              return (
+                <article key={order.id} aria-labelledby={`order-${order.id}`} className="glass overflow-hidden rounded-2xl">
+                  <div className="p-4 sm:p-6">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <h2 id={`order-${order.id}`} className="break-all text-2xl font-black text-orange-400 sm:text-3xl">
+                          {order.fulfillmentType === 'counter' ? `Token ${order.tokenNumber || order.orderNumber}` : `Order #${order.orderNumber || order.id.slice(-8)}`}
+                        </h2>
+                        <p className="mt-1 text-xs text-gray-500">Placed {formatDateTime(order.createdAt)}</p>
                       </div>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">{item.name || 'Item'}</p>
+                      <span className={`w-fit rounded-full border px-3 py-1 text-xs font-bold ${STATUS_STYLES[order.orderStatus] ?? 'border-white/10 bg-white/5 text-gray-300'}`}>
+                        {statusLabel(order.orderStatus)}
+                      </span>
                     </div>
-                    <p className="text-sm font-semibold text-gray-900 dark:text-white">{formatINR((item.unitPrice || 0) * (item.quantity || 0))}</p>
+
+                    <div className="mt-5 grid grid-cols-2 gap-3 rounded-xl border border-white/5 bg-black/10 p-3 sm:grid-cols-4">
+                      <div><p className="text-[11px] uppercase tracking-wider text-gray-600">Items</p><p className="mt-1 text-sm font-semibold text-gray-200">{quantity}</p></div>
+                      <div><p className="text-[11px] uppercase tracking-wider text-gray-600">Total</p><p className="mt-1 text-sm font-bold text-white">{formatINR(rupees(order.totalPaise, order.totalAmount))}</p></div>
+                      <div><p className="text-[11px] uppercase tracking-wider text-gray-600">Method</p><p className="mt-1 text-sm font-semibold text-gray-200">{PAYMENT_METHOD_LABELS[order.paymentMethod] ?? 'Not recorded'}</p></div>
+                      <div><p className="text-[11px] uppercase tracking-wider text-gray-600">Payment</p><p className="mt-1 text-sm font-semibold text-gray-200">{PAYMENT_LABELS[order.paymentStatus] ?? 'Not recorded'}</p></div>
+                    </div>
+
+                    <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <button
+                        type="button"
+                        aria-expanded={expanded}
+                        aria-controls={`order-details-${order.id}`}
+                        onClick={() => setExpandedId(expanded ? null : order.id)}
+                        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-gray-200 transition hover:bg-white/5"
+                      >
+                        {expanded ? <ChevronUp className="h-4 w-4" aria-hidden="true" /> : <ChevronDown className="h-4 w-4" aria-hidden="true" />}
+                        {expanded ? 'Hide details' : 'View details and timeline'}
+                      </button>
+                      {canCancel && cancelOrderId !== order.id && (
+                        <button
+                          type="button"
+                          disabled={Boolean(cancellingId)}
+                          onClick={() => {
+                            setCancelOrderId(order.id);
+                            setCancellationReason('');
+                            setNotice(null);
+                          }}
+                          className="min-h-11 rounded-xl border border-red-400/25 px-4 py-2 text-sm font-semibold text-red-300 transition hover:bg-red-400/10 disabled:opacity-50"
+                        >
+                          Request cancellation
+                        </button>
+                      )}
+                    </div>
+
+                    {cancelOrderId === order.id && canCancel && (
+                      <form onSubmit={(event) => void cancelOrder(event, order)} className="mt-4 rounded-xl border border-red-400/20 bg-red-400/[0.06] p-4">
+                        <label htmlFor={`cancel-reason-${order.id}`} className="text-sm font-bold text-red-100">Cancellation reason</label>
+                        <p id={`cancel-help-${order.id}`} className="mt-1 text-xs text-gray-400">
+                          Cancellation is submitted against the current order version and succeeds only if the order is still eligible.
+                        </p>
+                        <textarea
+                          id={`cancel-reason-${order.id}`}
+                          value={cancellationReason}
+                          onChange={(event) => setCancellationReason(event.target.value)}
+                          minLength={3}
+                          maxLength={300}
+                          required
+                          rows={3}
+                          aria-describedby={`cancel-help-${order.id}`}
+                          className="input-flame mt-3 resize-y"
+                          placeholder="Tell us why you need to cancel"
+                          disabled={cancelling}
+                        />
+                        <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                          <button
+                            type="button"
+                            disabled={cancelling}
+                            onClick={() => {
+                              setCancelOrderId(null);
+                              setCancellationReason('');
+                            }}
+                            className="min-h-11 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-gray-300 hover:bg-white/5 disabled:opacity-50"
+                          >
+                            Keep order
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={cancelling || cancellationReason.trim().length < 3}
+                            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {cancelling && <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                            {cancelling ? 'Cancelling…' : 'Confirm cancellation'}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+
+                    {order.orderStatus === 'cancelled' && order.cancellationReason && (
+                      <p className="mt-4 break-words rounded-xl bg-red-400/[0.06] px-4 py-3 text-xs text-gray-400">
+                        Cancellation reason: {order.cancellationReason}
+                      </p>
+                    )}
                   </div>
-                ))}
-              </div>
-              <div className="mt-6 pt-4 border-t border-gray-100 dark:border-gray-700 flex flex-col sm:flex-row justify-between items-start sm:items-center">
-                <div className="flex items-center gap-4">
-                  <p className="font-semibold text-gray-900 dark:text-white">Total</p>
-                  <p className="text-xl font-black flame-text">{formatINR(order.totalAmount)}</p>
-                </div>
-                <div className="flex items-center gap-2 mt-4 sm:mt-0">
-                  <button className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-sm font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-                    Reorder
-                  </button>
-                  <button className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-sm font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-                    Invoice
-                  </button>
-                  <button className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition-colors">
-                    Track Order
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+                  {expanded && <OrderDetails order={order} />}
+                </article>
+              );
+            })}
+          </div>
+
+          {pages > 1 && (
+            <nav className="mt-6 flex items-center justify-between gap-3" aria-label="Order history pages">
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                disabled={page <= 1 || refreshing || Boolean(cancellingId)}
+                className="inline-flex min-h-11 items-center gap-1 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-gray-300 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ChevronLeft className="h-4 w-4" aria-hidden="true" /> Previous
+              </button>
+              <span className="text-xs text-gray-500">Page {page} of {pages}</span>
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.min(pages, current + 1))}
+                disabled={page >= pages || refreshing || Boolean(cancellingId)}
+                className="inline-flex min-h-11 items-center gap-1 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-gray-300 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next <ChevronRight className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </nav>
+          )}
+        </section>
       )}
-    </div>
+    </main>
   );
 }

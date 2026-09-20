@@ -1,8 +1,9 @@
 import type { Metadata, Viewport } from 'next';
-import { Poppins, Inter } from 'next/font/google';
+import { Inter, Poppins } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/app/providers';
 import { JsonLd } from '@/components/JsonLd';
+import { getSiteName, getSiteUrl } from '@/lib/siteConfig';
 
 const poppins = Poppins({
   subsets: ['latin'],
@@ -18,49 +19,36 @@ const inter = Inter({
   display: 'swap',
 });
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://shatvikcorner.in';
+const siteUrl = getSiteUrl();
+const siteName = getSiteName();
 
 export const metadata: Metadata = {
-  metadataBase: new URL(siteUrl),
+  metadataBase: siteUrl,
   title: {
-    default: 'Shatvika Corner | Fast. Fresh. Delicious.',
-    template: '%s | Shatvika Corner',
+    default: `${siteName} | Menu and ordering`,
+    template: `%s | ${siteName}`,
   },
-  description:
-    'Premium fast food crafted with passion. Flame-grilled burgers, stone-baked pizzas, handmade shakes and more — delivered in under 30 minutes in Aligarh.',
-  keywords: [
-    'fast food',
-    'burgers',
-    'pizza',
-    'delivery',
-    'Aligarh',
-    'Shatvika Corner',
-    'flame grilled',
-  ],
-  authors: [{ name: 'Shatvika Corner' }],
-  creator: 'Shatvika Corner',
+  description: `Browse the current ${siteName} menu, place an order, and manage your customer account.`,
+  keywords: ['food menu', 'restaurant ordering', siteName],
+  authors: [{ name: siteName }],
+  creator: siteName,
   openGraph: {
-    title: 'Shatvika Corner — Premium Fast Food',
-    description: 'Fast. Fresh. Delicious. Order now and get it in under 30 minutes.',
+    title: `${siteName} — Menu and ordering`,
+    description: `Browse the current ${siteName} menu and ordering options.`,
     type: 'website',
     locale: 'en_IN',
     url: siteUrl,
-    siteName: 'Shatvika Corner',
+    siteName,
   },
   twitter: {
-    card: 'summary_large_image',
-    title: 'Shatvika Corner | Fast. Fresh. Delicious.',
-    description: 'Premium fast food delivered hot to your door.',
+    card: 'summary',
+    title: `${siteName} | Menu and ordering`,
+    description: `Browse the current ${siteName} menu and ordering options.`,
   },
   robots: { index: true, follow: true },
-  alternates: {
-    canonical: siteUrl,
-  },
+  alternates: { canonical: siteUrl },
   manifest: '/manifest.json',
-  icons: {
-    icon: '/icon-192.png',
-    apple: '/icon-192.png',
-  },
+  icons: { icon: '/icon.svg' },
 };
 
 export const viewport: Viewport = {
@@ -69,17 +57,15 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`dark scroll-smooth ${poppins.variable} ${inter.variable}`}>
+    <html
+      lang="en-IN"
+      data-scroll-behavior="smooth"
+      className={`dark scroll-smooth ${poppins.variable} ${inter.variable}`}
+    >
       <body className="bg-[#0a0a0a] text-white font-poppins antialiased">
-        <a href="#main-content" className="skip-link">
-          Skip to main content
-        </a>
+        <a href="#main-content" className="skip-link">Skip to main content</a>
         <Providers>
           <JsonLd />
           {children}

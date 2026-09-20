@@ -18,10 +18,7 @@ export async function isCustomerAuthed() {
   return isCustomerJwtAuthed();
 }
 
-/**
- * Get the current customer ID from the JWT cookie without DB verification.
- * Use in non-security-critical contexts to avoid DB overhead.
- */
+/** Return an account id only after signature, claims, account-state, and session-version checks. */
 export async function getCustomerId(): Promise<string | null> {
   return getCustomerIdFromCookie();
 }

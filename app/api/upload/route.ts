@@ -1,185 +1,270 @@
-import { NextResponse } from 'next/server';
-import { rateLimit, getClientIp } from '@/lib/rateLimit';
+import mongoose from 'mongoose';
+import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
+import { ADMIN_COOKIE_NAME, verifyAdminTokenState } from '@/lib/adminJwt';
+import { CUSTOMER_COOKIE_NAME, verifyCustomerTokenState } from '@/lib/customerJwt';
+import { logServerError } from '@/lib/apiError';
+import {
+  deleteMedia,
+  getMediaStorageConfiguration,
+  MediaStorageOperationError,
+  MediaStorageUnavailableError,
+  uploadMedia,
+  type MediaStorageScope,
+} from '@/lib/mediaStorage';
+import {
+  MAX_ADMIN_VIDEO_BYTES,
+  MAX_REVIEW_IMAGE_BYTES,
+  MULTIPART_OVERHEAD_BYTES,
+  validateMediaFile,
+} from '@/lib/mediaValidation';
+import { distributedRateLimit, getClientIp } from '@/lib/rateLimit';
+import { AuditEvent } from '@/models/AuditEvent';
+import { MediaAsset } from '@/models/MediaAsset';
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
-const ALLOWED_VIDEO_TYPES = new Set(['video/mp4', 'video/webm']);
-const ALLOWED_TYPES = new Set([...ALLOWED_IMAGE_TYPES, ...ALLOWED_VIDEO_TYPES]);
+const PRIVATE_HEADERS = { 'Cache-Control': 'private, no-store, max-age=0' };
+const deleteSchema = z.object({ assetId: z.string().regex(/^[a-f\d]{24}$/i) }).strict();
 
-const ALLOWED_IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp']);
-const ALLOWED_VIDEO_EXTENSIONS = new Set(['mp4', 'webm']);
-const ALLOWED_EXTENSIONS = new Set([...ALLOWED_IMAGE_EXTENSIONS, ...ALLOWED_VIDEO_EXTENSIONS]);
+type UploadActor = {
+  type: 'customer' | 'admin';
+  id: string;
+  permissions: string[];
+};
 
-/**
- * Sanitize filename to prevent directory traversal and malicious names
- */
-function sanitizeFilename(name: string): string {
-  // Remove any path separators and parent directory references
-  let sanitized = name
-    .replace(/\.\./g, '')
-    .replace(/[/\\]/g, '')
-    .replace(/[^a-zA-Z0-9._-]/g, '_')
-    .toLowerCase()
-    .slice(0, 80);
-
-  // Ensure filename is not empty
-  if (!sanitized || sanitized === '.' || sanitized === '..') {
-    sanitized = 'upload';
-  }
-
-  return sanitized;
+function response(body: Record<string, unknown>, status: number, headers?: HeadersInit) {
+  return NextResponse.json(body, { status, headers: { ...PRIVATE_HEADERS, ...headers } });
 }
 
-/**
- * Validate file extension matches MIME type
- */
-function validateFileExtension(filename: string, mimeType: string): boolean {
-  const ext = filename.split('.').pop()?.toLowerCase();
-  if (!ext || !ALLOWED_EXTENSIONS.has(ext)) {
-    return false;
-  }
-
-  // Verify extension matches MIME type
-  const mimeToExt: Record<string, string[]> = {
-    'image/jpeg': ['jpg', 'jpeg'],
-    'image/png': ['png'],
-    'image/webp': ['webp'],
-    'video/mp4': ['mp4'],
-    'video/webm': ['webm'],
-  };
-
-  const validExts = mimeToExt[mimeType] || [];
-  return validExts.includes(ext);
+function canManageMedia(permissions: string[]) {
+  return permissions.includes('*') || permissions.includes('media:manage');
 }
 
-/**
- * Validate image file magic bytes (prevent MIME type spoofing)
- */
-function validateFileMagic(bytes: Buffer, mimeType: string): boolean {
-  if (ALLOWED_VIDEO_TYPES.has(mimeType)) {
-    if (mimeType === 'video/webm') {
-      return bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3;
+async function authorizeForScope(request: NextRequest, scope: MediaStorageScope): Promise<
+  | { ok: true; actor: UploadActor }
+  | { ok: false; status: number; error: string }
+> {
+  if (scope === 'review') {
+    const token = request.cookies.get(CUSTOMER_COOKIE_NAME)?.value;
+    if (!token) return { ok: false, status: 401, error: 'UNAUTHENTICATED' };
+    const state = await verifyCustomerTokenState(token);
+    if (state.status === 'database_unavailable') return { ok: false, status: 503, error: 'DATABASE_UNAVAILABLE' };
+    if (state.status !== 'valid') return { ok: false, status: 401, error: 'UNAUTHENTICATED' };
+    return { ok: true, actor: { type: 'customer', id: state.accountId, permissions: [] } };
+  }
+
+  const token = request.cookies.get(ADMIN_COOKIE_NAME)?.value;
+  if (!token) return { ok: false, status: 401, error: 'UNAUTHENTICATED' };
+  const state = await verifyAdminTokenState(token);
+  if (state.status === 'database_unavailable') return { ok: false, status: 503, error: 'DATABASE_UNAVAILABLE' };
+  if (state.status !== 'valid') return { ok: false, status: 401, error: 'UNAUTHENTICATED' };
+  if (!canManageMedia(state.permissions)) return { ok: false, status: 403, error: 'FORBIDDEN' };
+  return { ok: true, actor: { type: 'admin', id: state.accountId, permissions: state.permissions } };
+}
+
+async function authorizeForDeletion(request: NextRequest): Promise<
+  | { ok: true; actor: UploadActor }
+  | { ok: false; status: number; error: string }
+> {
+  const adminToken = request.cookies.get(ADMIN_COOKIE_NAME)?.value;
+  if (adminToken) {
+    const state = await verifyAdminTokenState(adminToken);
+    if (state.status === 'database_unavailable') return { ok: false, status: 503, error: 'DATABASE_UNAVAILABLE' };
+    if (state.status === 'valid') {
+      if (!canManageMedia(state.permissions)) return { ok: false, status: 403, error: 'FORBIDDEN' };
+      return { ok: true, actor: { type: 'admin', id: state.accountId, permissions: state.permissions } };
     }
-    // MP4: ftyp box typically at offset 4
-    return bytes.length > 8 && bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70;
   }
-
-  // Check magic bytes for common image formats
-  if (mimeType === 'image/jpeg') {
-    // JPEG: FF D8 FF
-    return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
-  }
-  if (mimeType === 'image/png') {
-    // PNG: 89 50 4E 47
-    return bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
-  }
-  if (mimeType === 'image/webp') {
-    // WebP: RIFF ... WEBP
-    return (
-      bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
-      bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
-    );
-  }
-  return false;
+  const customerToken = request.cookies.get(CUSTOMER_COOKIE_NAME)?.value;
+  if (!customerToken) return { ok: false, status: 401, error: 'UNAUTHENTICATED' };
+  const state = await verifyCustomerTokenState(customerToken);
+  if (state.status === 'database_unavailable') return { ok: false, status: 503, error: 'DATABASE_UNAVAILABLE' };
+  if (state.status !== 'valid') return { ok: false, status: 401, error: 'UNAUTHENTICATED' };
+  return { ok: true, actor: { type: 'customer', id: state.accountId, permissions: [] } };
 }
 
-export async function POST(req: Request) {
+async function recordAudit(input: {
+  actor: UploadActor;
+  action: string;
+  assetId?: string;
+  outcome: 'success' | 'failure';
+  request: NextRequest;
+  metadata: Record<string, unknown>;
+}) {
+  await AuditEvent.create({
+    actorType: input.actor.type,
+    actorId: input.actor.id,
+    action: input.action,
+    resourceType: 'media_asset',
+    resourceId: input.assetId ?? null,
+    correlationId: input.request.headers.get('x-request-id'),
+    outcome: input.outcome,
+    metadata: input.metadata,
+  }).catch(() => undefined);
+}
+
+export async function POST(request: NextRequest) {
+  const scopeValue = request.nextUrl.searchParams.get('scope');
+  if (scopeValue !== 'review' && scopeValue !== 'admin-gallery') {
+    return response({ ok: false, error: 'INVALID_UPLOAD_SCOPE' }, 400);
+  }
+  const scope: MediaStorageScope = scopeValue;
+  const authorization = await authorizeForScope(request, scope);
+  if (!authorization.ok) return response({ ok: false, error: authorization.error }, authorization.status);
+  const { actor } = authorization;
+
+  if (getMediaStorageConfiguration().provider === 'disabled') {
+    return response({
+      ok: false,
+      error: 'UPLOAD_STORAGE_NOT_CONFIGURED',
+      message: 'Durable media uploads are unavailable until object storage is configured.',
+    }, 503);
+  }
+
   try {
-    // Rate limiting: 10 uploads per minute per IP
-    const ip = getClientIp(req);
-    const rateLimitResult = rateLimit(`upload:${ip}`, 10, 60);
-    if (!rateLimitResult.allowed) {
-      return NextResponse.json(
-        { ok: false, error: 'RATE_LIMITED', retryAfter: rateLimitResult.retryAfter },
-        { status: 429 }
-      );
-    }
-
-    // Parse form data
-    let form: FormData;
-    try {
-      form = await req.formData();
-    } catch {
-      return NextResponse.json(
-        { ok: false, error: 'INVALID_FORM_DATA' },
-        { status: 400 }
-      );
-    }
-
-    const file = form.get('file');
-
-    // Validate file exists and is a File object
-    if (!file || !(file instanceof File)) {
-      return NextResponse.json(
-        { ok: false, error: 'NO_FILE' },
-        { status: 400 }
-      );
-    }
-
-    // Validate MIME type
-    if (!ALLOWED_TYPES.has(file.type)) {
-      return NextResponse.json(
-        { ok: false, error: 'INVALID_TYPE' },
-        { status: 400 }
-      );
-    }
-
-    const maxBytes = ALLOWED_VIDEO_TYPES.has(file.type) ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES;
-    if (file.size > maxBytes) {
-      return NextResponse.json(
-        { ok: false, error: 'FILE_TOO_LARGE' },
-        { status: 413 }
-      );
-    }
-
-    // Validate file extension
-    if (!validateFileExtension(file.name, file.type)) {
-      return NextResponse.json(
-        { ok: false, error: 'EXTENSION_MISMATCH' },
-        { status: 400 }
-      );
-    }
-
-    // Read file bytes and validate magic bytes
-    const bytes = Buffer.from(await file.arrayBuffer());
-    if (!validateFileMagic(bytes, file.type)) {
-      return NextResponse.json(
-        { ok: false, error: 'INVALID_FILE_CONTENT' },
-        { status: 400 }
-      );
-    }
-
-    // Sanitize filename
-    const sanitized = sanitizeFilename(file.name);
-    const filename = `${Date.now()}-${sanitized}`;
-
-    // Save file
-    const fs = require('fs');
-    const p = require('path');
-
-    const publicDir = p.join(process.cwd(), 'public');
-    const uploadDir = p.join(publicDir, 'uploads');
-
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-
-    const filePath = p.join(uploadDir, filename);
-    fs.writeFileSync(filePath, bytes);
-
-    const mediaType = ALLOWED_VIDEO_TYPES.has(file.type) ? 'video' : 'image';
-    return NextResponse.json(
-      { ok: true, imageUrl: `/uploads/${filename}`, mediaType },
-      { status: 201 }
+    const limited = await distributedRateLimit(
+      `media-upload:${scope}:${actor.type}:${actor.id}:${getClientIp(request)}`,
+      scope === 'review' ? 5 : 20,
+      60,
     );
-  } catch (err) {
-    console.error('[Upload] error:', err);
-    return NextResponse.json(
-      { ok: false, error: 'UPLOAD_FAILED' },
-      { status: 500 }
-    );
+    if (!limited.allowed) {
+      return response(
+        { ok: false, error: 'RATE_LIMITED', retryAfter: limited.retryAfter },
+        429,
+        { 'Retry-After': String(limited.retryAfter ?? 60) },
+      );
+    }
+  } catch (error) {
+    logServerError({ route: 'POST /api/upload rate-limit', err: error, requestId: request.headers.get('x-request-id') });
+    return response({ ok: false, error: 'RATE_LIMIT_UNAVAILABLE' }, 503);
+  }
+
+  const contentLengthHeader = request.headers.get('content-length');
+  if (!contentLengthHeader) {
+    // Reject chunked multipart bodies before parsing so an attacker cannot
+    // bypass the in-memory body ceiling by omitting Content-Length.
+    return response({ ok: false, error: 'CONTENT_LENGTH_REQUIRED' }, 411);
+  }
+  const contentLength = Number(contentLengthHeader);
+  const maximumBody = (scope === 'review' ? MAX_REVIEW_IMAGE_BYTES : MAX_ADMIN_VIDEO_BYTES) + MULTIPART_OVERHEAD_BYTES;
+  if (!Number.isSafeInteger(contentLength) || contentLength < 0) {
+    return response({ ok: false, error: 'INVALID_CONTENT_LENGTH' }, 400);
+  }
+  if (contentLength > maximumBody) return response({ ok: false, error: 'REQUEST_TOO_LARGE' }, 413);
+
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch {
+    return response({ ok: false, error: 'INVALID_FORM_DATA' }, 400);
+  }
+  const file = form.get('file');
+  if (!(file instanceof File)) return response({ ok: false, error: 'NO_FILE' }, 400);
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const validation = validateMediaFile({ bytes, filename: file.name, mimeType: file.type, scope });
+  if (!validation.ok) {
+    const status = validation.error === 'FILE_TOO_LARGE' ? 413 : 400;
+    return response({ ok: false, error: validation.error }, status);
+  }
+
+  let stored: Awaited<ReturnType<typeof uploadMedia>>;
+  try {
+    stored = await uploadMedia({
+      bytes,
+      mimeType: validation.mimeType,
+      mediaType: validation.mediaType,
+      scope,
+    });
+  } catch (error) {
+    await recordAudit({ actor, action: 'media.upload', outcome: 'failure', request, metadata: { scope, reason: 'provider_failure' } });
+    if (error instanceof MediaStorageUnavailableError) return response({ ok: false, error: error.code }, 503);
+    logServerError({ route: 'POST /api/upload provider', err: error, requestId: request.headers.get('x-request-id') });
+    return response({ ok: false, error: 'UPLOAD_PROVIDER_FAILED' }, 502);
+  }
+
+  try {
+    const asset = await MediaAsset.create({
+      provider: stored.provider,
+      publicId: stored.publicId,
+      url: stored.url,
+      resourceType: stored.resourceType,
+      mimeType: validation.mimeType,
+      bytes: stored.bytes,
+      scope,
+      ownerType: actor.type,
+      ownerId: actor.id,
+      status: 'active',
+    });
+    await recordAudit({
+      actor,
+      action: 'media.upload',
+      assetId: String(asset._id),
+      outcome: 'success',
+      request,
+      metadata: { scope, mediaType: stored.resourceType, bytes: stored.bytes, provider: stored.provider },
+    });
+    return response({
+      ok: true,
+      assetId: String(asset._id),
+      imageUrl: stored.url,
+      url: stored.url,
+      mediaType: stored.resourceType,
+    }, 201);
+  } catch (error) {
+    await deleteMedia({ publicId: stored.publicId, resourceType: stored.resourceType }).catch(() => undefined);
+    await recordAudit({ actor, action: 'media.upload', outcome: 'failure', request, metadata: { scope, reason: 'metadata_persistence_failure' } });
+    logServerError({ route: 'POST /api/upload metadata', err: error, requestId: request.headers.get('x-request-id') });
+    return response({ ok: false, error: 'UPLOAD_METADATA_FAILED' }, 503);
   }
 }
 
+export async function DELETE(request: NextRequest) {
+  const authorization = await authorizeForDeletion(request);
+  if (!authorization.ok) return response({ ok: false, error: authorization.error }, authorization.status);
+  const { actor } = authorization;
+  const parsed = deleteSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return response({ ok: false, error: 'VALIDATION_FAILED', details: parsed.error.flatten() }, 400);
+
+  let asset;
+  try {
+    asset = await MediaAsset.findById(parsed.data.assetId).select('+publicId').lean();
+  } catch (error) {
+    logServerError({ route: 'DELETE /api/upload lookup', err: error, requestId: request.headers.get('x-request-id') });
+    return response({ ok: false, error: 'DATABASE_UNAVAILABLE' }, 503);
+  }
+  if (!asset || asset.status === 'deleted') return response({ ok: false, error: 'ASSET_NOT_FOUND' }, 404);
+  const customerOwnsUnlinkedReview = actor.type === 'customer' &&
+    asset.ownerType === 'customer' && asset.ownerId === actor.id && asset.scope === 'review';
+  if (actor.type !== 'admin' && !customerOwnsUnlinkedReview) return response({ ok: false, error: 'FORBIDDEN' }, 403);
+  if (asset.linkedResourceId) return response({ ok: false, error: 'ASSET_IN_USE' }, 409);
+
+  try {
+    const claimed = await MediaAsset.findOneAndUpdate(
+      { _id: new mongoose.Types.ObjectId(parsed.data.assetId), status: 'active', linkedResourceId: null },
+      { $set: { status: 'deleting' } },
+      { returnDocument: 'after' },
+    ).select('+publicId').lean();
+    if (!claimed) return response({ ok: false, error: 'ASSET_DELETE_CONFLICT' }, 409);
+    try {
+      await deleteMedia({ publicId: claimed.publicId, resourceType: claimed.resourceType });
+    } catch (error) {
+      await MediaAsset.updateOne({ _id: claimed._id, status: 'deleting' }, { $set: { status: 'active' } }).catch(() => undefined);
+      await recordAudit({ actor, action: 'media.delete', assetId: parsed.data.assetId, outcome: 'failure', request, metadata: { reason: 'provider_failure' } });
+      if (error instanceof MediaStorageUnavailableError) return response({ ok: false, error: error.code }, 503);
+      if (error instanceof MediaStorageOperationError) return response({ ok: false, error: 'DELETE_PROVIDER_FAILED' }, 502);
+      throw error;
+    }
+    await MediaAsset.updateOne(
+      { _id: claimed._id, status: 'deleting' },
+      { $set: { status: 'deleted', deletedAt: new Date() } },
+    );
+    await recordAudit({ actor, action: 'media.delete', assetId: parsed.data.assetId, outcome: 'success', request, metadata: { scope: asset.scope, provider: asset.provider } });
+    return response({ ok: true, assetId: parsed.data.assetId }, 200);
+  } catch (error) {
+    logServerError({ route: 'DELETE /api/upload', err: error, requestId: request.headers.get('x-request-id') });
+    return response({ ok: false, error: 'MEDIA_DELETE_FAILED' }, 500);
+  }
+}

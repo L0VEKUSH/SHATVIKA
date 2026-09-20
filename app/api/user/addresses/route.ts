@@ -1,160 +1,65 @@
 import { NextResponse } from 'next/server';
+import { addressSchema } from '@/lib/addressValidation';
+import { logServerError } from '@/lib/apiError';
+import {
+  enforceCustomerMutationRateLimit,
+  PRIVATE_NO_STORE_HEADERS,
+  requireCurrentCustomer,
+} from '@/lib/customerRouteAuth';
 import { User } from '@/models/User';
-import { connectToMongo } from '@/lib/mongoose';
-import { getCustomerId, isCustomerAuthed } from '@/lib/customerAuth';
-import { validatePhone } from '@/lib/validators';
 
-export async function GET() {
+export const dynamic = 'force-dynamic';
+
+export async function GET(request: Request) {
+  const auth = await requireCurrentCustomer();
+  if (!auth.ok) return auth.response;
   try {
-    const isAuthed = await isCustomerAuthed();
-    if (!isAuthed) {
-      return NextResponse.json(
-        { ok: false, error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
-
-    const userId = await getCustomerId();
-    if (!userId) {
-      return NextResponse.json(
-        { ok: false, error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
-
-    await connectToMongo();
-
-    const user = await User.findById(userId).lean();
+    const user = await User.findOne({ _id: auth.accountId, isActive: { $ne: false } })
+      .select('_id addresses')
+      .lean();
     if (!user) {
-      return NextResponse.json(
-        { ok: false, error: 'User not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ ok: false, error: 'ACCOUNT_NOT_FOUND' }, { status: 404, headers: PRIVATE_NO_STORE_HEADERS });
     }
-
-    return NextResponse.json({ ok: true, addresses: user.addresses || [] });
-  } catch (err) {
-    console.error('[GetAddresses] error:', err);
-    return NextResponse.json(
-      { ok: false, error: 'Failed to fetch addresses' },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: true, addresses: user.addresses ?? [] }, { headers: PRIVATE_NO_STORE_HEADERS });
+  } catch (error) {
+    logServerError({ route: 'GET /api/user/addresses', err: error, requestId: request.headers.get('x-request-id') });
+    return NextResponse.json({ ok: false, error: 'DATABASE_UNAVAILABLE' }, { status: 503, headers: PRIVATE_NO_STORE_HEADERS });
   }
 }
 
-export async function POST(req: Request) {
-  try {
-    const isAuthed = await isCustomerAuthed();
-    if (!isAuthed) {
-      return NextResponse.json(
-        { ok: false, error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
-
-    const userId = await getCustomerId();
-    if (!userId) {
-      return NextResponse.json(
-        { ok: false, error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
-
-    const body = await req.json().catch(() => null);
-    if (!body || typeof body !== 'object') {
-      return NextResponse.json(
-        { ok: false, error: 'Invalid request body' },
-        { status: 400 }
-      );
-    }
-
-    const { label, street, city, state, zipCode, phone, isDefault } = body;
-
-    // Validate required fields
-    if (!label || typeof label !== 'string' || !label.trim()) {
-      return NextResponse.json(
-        { ok: false, error: 'Label is required' },
-        { status: 400 }
-      );
-    }
-
-    if (!street || typeof street !== 'string' || !street.trim()) {
-      return NextResponse.json(
-        { ok: false, error: 'Street address is required' },
-        { status: 400 }
-      );
-    }
-
-    if (!city || typeof city !== 'string' || !city.trim()) {
-      return NextResponse.json(
-        { ok: false, error: 'City is required' },
-        { status: 400 }
-      );
-    }
-
-    if (!state || typeof state !== 'string' || !state.trim()) {
-      return NextResponse.json(
-        { ok: false, error: 'State is required' },
-        { status: 400 }
-      );
-    }
-
-    if (!zipCode || typeof zipCode !== 'string' || !zipCode.trim()) {
-      return NextResponse.json(
-        { ok: false, error: 'Zip code is required' },
-        { status: 400 }
-      );
-    }
-
-    const phoneVal = validatePhone(phone);
-    if (!phoneVal.valid) {
-      return NextResponse.json(
-        { ok: false, error: phoneVal.error },
-        { status: 400 }
-      );
-    }
-
-    const newAddress = {
-      label: label.trim(),
-      street: street.trim(),
-      city: city.trim(),
-      state: state.trim(),
-      zipCode: zipCode.trim(),
-      phone: phone.replace(/\D/g, ''),
-      isDefault: isDefault === true,
-    };
-
-    await connectToMongo();
-
-    const user = await User.findById(userId);
-    if (!user) {
-      return NextResponse.json(
-        { ok: false, error: 'User not found' },
-        { status: 404 }
-      );
-    }
-
-    // If isDefault, unset other defaults
-    if (newAddress.isDefault && user.addresses) {
-      user.addresses.forEach((addr: any) => {
-        addr.isDefault = false;
-      });
-    }
-
-
-    if (!user.addresses) {
-      user.addresses = [];
-    }
-
-    user.addresses.push(newAddress);
-    await user.save();
-
-    return NextResponse.json({ ok: true, addresses: user.addresses });
-  } catch (err) {
-    console.error('[CreateAddress] error:', err);
+export async function POST(request: Request) {
+  const auth = await requireCurrentCustomer();
+  if (!auth.ok) return auth.response;
+  const limited = await enforceCustomerMutationRateLimit({ accountId: auth.accountId, scope: 'address-write' });
+  if (limited) return limited;
+  if (!(request.headers.get('content-type') ?? '').toLowerCase().startsWith('application/json')) {
+    return NextResponse.json({ ok: false, error: 'UNSUPPORTED_MEDIA_TYPE' }, { status: 415, headers: PRIVATE_NO_STORE_HEADERS });
+  }
+  const parsed = addressSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) {
     return NextResponse.json(
-      { ok: false, error: 'Failed to create address' },
-      { status: 500 }
+      { ok: false, error: 'VALIDATION_FAILED', details: parsed.error.flatten() },
+      { status: 400, headers: PRIVATE_NO_STORE_HEADERS },
     );
+  }
+
+  try {
+    const user = await User.findOne({ _id: auth.accountId, isActive: { $ne: false } }).select('_id addresses');
+    if (!user) {
+      return NextResponse.json({ ok: false, error: 'ACCOUNT_NOT_FOUND' }, { status: 404, headers: PRIVATE_NO_STORE_HEADERS });
+    }
+    if ((user.addresses?.length ?? 0) >= 20) {
+      return NextResponse.json({ ok: false, error: 'ADDRESS_LIMIT_REACHED' }, { status: 409, headers: PRIVATE_NO_STORE_HEADERS });
+    }
+    if (parsed.data.isDefault) {
+      user.addresses?.forEach((address: { isDefault: boolean }) => { address.isDefault = false; });
+    }
+    user.addresses ??= [];
+    user.addresses.push(parsed.data);
+    await user.save();
+    return NextResponse.json({ ok: true, addresses: user.addresses }, { status: 201, headers: PRIVATE_NO_STORE_HEADERS });
+  } catch (error) {
+    logServerError({ route: 'POST /api/user/addresses', err: error, requestId: request.headers.get('x-request-id') });
+    return NextResponse.json({ ok: false, error: 'ADDRESS_CREATE_FAILED' }, { status: 500, headers: PRIVATE_NO_STORE_HEADERS });
   }
 }

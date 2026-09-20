@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { apiRequest } from '@/lib/apiClient';
 
 export default function AdminSignupPage() {
   const router = useRouter();
@@ -18,21 +19,14 @@ export default function AdminSignupPage() {
     setError(null);
 
     try {
-      const res = await fetch('/admin/api/signup', {
+      await apiRequest('/admin/api/signup', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, setupKey }),
+        body: { email, password, setupKey },
+        suppressSessionExpiry: true,
       });
-
-      const data = await res.json().catch(() => null);
-
-      if (!res.ok) {
-        setError(data?.message ?? 'Signup failed');
-        return;
-      }
-
-      // After signup we go straight to admin.
       router.replace('/admin');
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Signup failed');
     } finally {
       setSubmitting(false);
     }
@@ -47,7 +41,7 @@ export default function AdminSignupPage() {
         </p>
 
 
-        {error && <div className="mt-4 text-sm text-red-400">{error}</div>}
+        {error && <div role="alert" className="mt-4 text-sm text-red-400">{error}</div>}
 
         <form onSubmit={onSubmit} className="mt-6 space-y-4">
           <div>

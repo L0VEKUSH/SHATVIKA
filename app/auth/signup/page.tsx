@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { AuthForm, FormField } from '@/components/AuthForm';
 import { validateEmail, validatePassword, validatePhone, validateFullName } from '@/lib/validators';
 import { useAuth } from '@/context/AuthContext';
+import { safeReturnPath } from '@/lib/returnPath';
 
 export default function SignupPage() {
   const router = useRouter();
@@ -68,7 +69,8 @@ export default function SignupPage() {
     try {
       setIsLoading(true);
       await signup(formData.fullName, formData.email, formData.phone, formData.password, formData.confirmPassword);
-      router.push('/customer/dashboard');
+      const returnTo = safeReturnPath(new URLSearchParams(window.location.search).get('returnTo'), '/customer');
+      router.replace(returnTo);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create account';
       setApiError(message);
@@ -88,6 +90,7 @@ export default function SignupPage() {
       validation: validateFullName,
       showFeedback: true,
       required: true,
+      autoComplete: 'name',
     },
     {
       name: 'email',
@@ -99,6 +102,7 @@ export default function SignupPage() {
       validation: validateEmail,
       showFeedback: true,
       required: true,
+      autoComplete: 'email',
     },
     {
       name: 'phone',
@@ -110,6 +114,7 @@ export default function SignupPage() {
       validation: validatePhone,
       showFeedback: true,
       required: true,
+      autoComplete: 'tel',
     },
     {
       name: 'password',
@@ -121,6 +126,7 @@ export default function SignupPage() {
       validation: validatePassword,
       showFeedback: true,
       required: true,
+      autoComplete: 'new-password',
     },
     {
       name: 'confirmPassword',
@@ -130,6 +136,7 @@ export default function SignupPage() {
       value: formData.confirmPassword,
       error: errors.confirmPassword,
       required: true,
+      autoComplete: 'new-password',
     },
   ];
 

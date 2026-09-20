@@ -33,6 +33,16 @@ export default function Home() {
     document.documentElement.classList.toggle('light', !darkMode);
   }, [darkMode]);
 
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    if (query.get('confirmOrder') !== '1') return;
+    setCartTab('cart');
+    setCartOpen(true);
+    query.delete('confirmOrder');
+    const remaining = query.toString();
+    window.history.replaceState(null, '', `${window.location.pathname}${remaining ? `?${remaining}` : ''}${window.location.hash}`);
+  }, []);
+
   const handleCartOpen = (tab: 'cart' | 'wishlist' = 'cart') => {
     setCartTab(tab);
     setCartOpen(true);

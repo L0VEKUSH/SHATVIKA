@@ -8,11 +8,11 @@ import { AuthProvider } from '@/context/AuthContext';
 export function Providers({ children }: { children: ReactNode }) {
   return (
     <AuthProvider>
-      <CartProvider>
-        <AdminProvider>
+      <AdminProvider>
+        <CartProvider>
           {children}
-        </AdminProvider>
-      </CartProvider>
+        </CartProvider>
+      </AdminProvider>
     </AuthProvider>
   );
 }

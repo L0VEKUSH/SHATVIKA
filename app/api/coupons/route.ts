@@ -1,67 +1,88 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
+import { getAdminSessionState } from '@/lib/adminJwt';
 import { connectToMongo } from '@/lib/mongoose';
 import { Coupon } from '@/models/Coupon';
-import { isAdminJwtAuthed } from '@/lib/adminJwt';
-import { z } from 'zod';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
-  try {
-    const isAuthed = await isAdminJwtAuthed();
-    if (!isAuthed) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+const couponSchema = z.object({
+  code: z.string().trim().min(2).max(50).regex(/^[A-Za-z0-9_-]+$/),
+  discountType: z.enum(['percentage', 'fixed']),
+  discountValue: z.number().positive().max(1_000_000),
+  minOrderValue: z.number().nonnegative().max(1_000_000).optional(),
+  maxDiscount: z.number().nonnegative().max(1_000_000).nullable().optional(),
+  applicableCategories: z.array(z.string().trim().min(1).max(80)).max(30).optional(),
+  visibility: z.enum(['public', 'private']).optional(),
+  usageLimit: z.number().int().positive().max(1_000_000).nullable().optional(),
+  perCustomerLimit: z.number().int().positive().max(100).optional(),
+  startsAt: z.string().datetime({ offset: true }).nullable().optional(),
+  expiresAt: z.string().datetime({ offset: true }),
+  isActive: z.boolean().optional(),
+}).strict().superRefine((coupon, context) => {
+  if (coupon.discountType === 'percentage' && coupon.discountValue > 100) {
+    context.addIssue({ code: 'custom', path: ['discountValue'], message: 'Percentage cannot exceed 100' });
+  }
+  if (coupon.startsAt && new Date(coupon.startsAt) >= new Date(coupon.expiresAt)) {
+    context.addIssue({ code: 'custom', path: ['expiresAt'], message: 'Expiry must be after the start date' });
+  }
+});
 
+export async function GET(request: NextRequest) {
+  const adminRequested = request.nextUrl.searchParams.get('scope') === 'admin';
+  if (adminRequested) {
+    const admin = await getAdminSessionState();
+    if (admin.status !== 'valid') {
+      return NextResponse.json({ ok: false, error: admin.status === 'database_unavailable' ? 'DATABASE_UNAVAILABLE' : 'UNAUTHORIZED' }, { status: admin.status === 'database_unavailable' ? 503 : 401 });
+    }
+  }
+  try {
     await connectToMongo();
-    const coupons = await Coupon.find().sort({ createdAt: -1 }).lean();
-    return NextResponse.json(coupons);
-  } catch (err) {
-    console.error('[GET /api/coupons]', err);
-    return NextResponse.json({ error: 'Failed to fetch coupons' }, { status: 500 });
+    const now = new Date();
+    const filter = adminRequested ? {} : {
+      isActive: true,
+      visibility: { $ne: 'private' },
+      expiresAt: { $gt: now },
+      $or: [{ startsAt: null }, { startsAt: { $lte: now } }],
+    };
+    const query = Coupon.find(filter).sort({ createdAt: -1 });
+    if (!adminRequested) {
+      query.select('code discountType discountValue minOrderValue maxDiscount applicableCategories expiresAt isActive visibility');
+    }
+    const coupons = await query.lean();
+    return NextResponse.json(
+      { ok: true, coupons },
+      { headers: { 'Cache-Control': adminRequested ? 'private, no-store' : 'public, max-age=30' } },
+    );
+  } catch (error) {
+    console.error('[GET /api/coupons]', error instanceof Error ? error.message : 'Unknown error');
+    return NextResponse.json({ ok: false, error: 'COUPONS_UNAVAILABLE' }, { status: 503 });
   }
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(request: NextRequest) {
+  const admin = await getAdminSessionState();
+  if (admin.status !== 'valid') {
+    return NextResponse.json({ ok: false, error: admin.status === 'database_unavailable' ? 'DATABASE_UNAVAILABLE' : 'UNAUTHORIZED' }, { status: admin.status === 'database_unavailable' ? 503 : 401 });
+  }
+  const parsed = couponSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json({ ok: false, error: 'VALIDATION_FAILED', details: parsed.error.flatten() }, { status: 400 });
+  }
   try {
-    const isAuthed = await isAdminJwtAuthed();
-    if (!isAuthed) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    const body = await req.json().catch(() => null);
-    const schema = z.object({
-      code: z.string().min(1),
-      discountType: z.enum(['percentage', 'fixed']),
-      discountValue: z.number().positive(),
-      minOrderValue: z.number().min(0).optional(),
-      maxDiscount: z.number().min(0).nullable().optional(),
-      applicableCategories: z.array(z.string()).optional(),
-      usageLimit: z.number().int().positive().nullable().optional(),
-      expiresAt: z.string().datetime(),
-      isActive: z.boolean().optional(),
-    });
-
-    const parsed = schema.safeParse(body);
-    if (!parsed.success) {
-      return NextResponse.json({ error: 'Validation failed', details: parsed.error.flatten() }, { status: 400 });
-    }
-
-    await connectToMongo();
-    const newCoupon = await Coupon.create({
+    const created = await Coupon.create({
       ...parsed.data,
       code: parsed.data.code.toUpperCase(),
+      startsAt: parsed.data.startsAt ? new Date(parsed.data.startsAt) : null,
       expiresAt: new Date(parsed.data.expiresAt),
-      minOrderValue: parsed.data.minOrderValue ?? 0,
-      maxDiscount: parsed.data.maxDiscount ?? null,
-      applicableCategories: parsed.data.applicableCategories ?? [],
-      usageLimit: parsed.data.usageLimit ?? null,
-      isActive: parsed.data.isActive ?? true,
-      createdBy: null,
+      createdBy: admin.accountId,
     });
-    return NextResponse.json(newCoupon, { status: 201 });
-  } catch (err: unknown) {
-    console.error('[POST /api/coupons]', err);
-    // Duplicate key
-    if (err && typeof err === 'object' && 'code' in err && (err as {code: number}).code === 11000) {
-      return NextResponse.json({ error: 'Coupon code already exists' }, { status: 409 });
+    return NextResponse.json({ ok: true, coupon: created.toJSON() }, { status: 201 });
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 11000) {
+      return NextResponse.json({ ok: false, error: 'COUPON_CODE_EXISTS' }, { status: 409 });
     }
-    return NextResponse.json({ error: 'Failed to create coupon' }, { status: 500 });
+    console.error('[POST /api/coupons]', error instanceof Error ? error.message : 'Unknown error');
+    return NextResponse.json({ ok: false, error: 'COUPON_CREATE_FAILED' }, { status: 500 });
   }
 }

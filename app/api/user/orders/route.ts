@@ -1,317 +1,174 @@
 import { NextRequest, NextResponse } from 'next/server';
-import mongoose from 'mongoose';
-import { connectToMongo } from '@/lib/mongoose';
-import { Order } from '@/models/Order';
-import { MenuItem } from '@/models/MenuItem';
-import { Coupon } from '@/models/Coupon';
-import { User } from '@/models/User';
-import { verifyCustomerToken } from '@/lib/customerJwt';
 import { z } from 'zod';
-import { getCustomerId } from '@/lib/customerAuth';
-import { rateLimit, getClientIp } from '@/lib/rateLimit';
+import { connectToMongo } from '@/lib/mongoose';
+import { getCustomerId, isCustomerAuthed } from '@/lib/customerAuth';
+import { distributedRateLimit } from '@/lib/rateLimit';
+import { BusinessRulesConfigurationError } from '@/lib/businessRules';
+import { createCustomerOrder, OrderServiceError } from '@/lib/orders/service';
+import { ORDER_STATUSES } from '@/lib/orders/stateMachine';
+import { Order } from '@/models/Order';
 
-function getTokenFromCookies(cookieHeader: string | null) {
-  if (!cookieHeader) return null;
-  const match = cookieHeader.match(/(?:^|;\s*)customer_session=([^;]+)/);
-  return match?.[1] ? decodeURIComponent(match[1]) : null;
+export const dynamic = 'force-dynamic';
+
+const createOrderSchema = z.object({
+  items: z.array(z.object({
+    menuItemId: z.string().min(1),
+    variantId: z.string().max(120).optional(),
+    quantity: z.number().int().min(1).max(100),
+  })).min(1).max(100),
+  fulfillmentType: z.literal('counter').default('counter'),
+  paymentMethod: z.literal('counter').default('counter'),
+  couponCode: z.string().trim().min(1).max(50).optional(),
+  specialInstructions: z.string().trim().max(500).optional(),
+}).strict();
+
+function publicOrder(order: any) {
+  return {
+    id: String(order._id),
+    orderNumber: order.tokenNumber ?? String(order._id).slice(-8),
+    tokenNumber: order.tokenNumber ?? null,
+    tokenBusinessDate: order.tokenBusinessDate ?? null,
+    fulfillmentType: order.fulfillmentType ?? 'delivery',
+    fulfillmentLocationId: order.fulfillmentLocationId ?? null,
+    fulfillmentLocationName: order.fulfillmentLocationName ?? null,
+    items: (order.items ?? []).map((item: any) => ({
+      menuItemId: String(item.menuItemId),
+      name: item.productName ?? item.name,
+      quantity: Number(item.quantity),
+      qty: Number(item.quantity),
+      unitPrice: Number(item.unitPrice),
+      price: Number(item.unitPrice),
+      unitPricePaise: item.unitPricePaise,
+      totalPricePaise: item.totalPricePaise,
+      variantId: item.variantId,
+      variantName: item.variantName,
+      categoryName: item.categoryName,
+    })),
+    subtotal: order.subtotal,
+    discount: order.discount,
+    tax: order.tax,
+    deliveryCharge: order.deliveryCharge,
+    totalAmount: order.totalAmount,
+    totalPaise: order.totalPaise,
+    paymentMethod: order.paymentMethod,
+    paymentStatus: order.paymentStatus,
+    orderStatus: order.orderStatus,
+    stateVersion: Number(order.stateVersion ?? 0),
+    statusHistory: order.statusHistory,
+    deliveryAddress: order.deliveryAddress,
+    specialInstructions: order.specialInstructions,
+    createdAt: order.createdAt,
+    estimatedDeliveryTime: order.estimatedDeliveryTime,
+    estimatedReadyTime: order.estimatedReadyTime,
+    servedAt: order.servedAt,
+    servedByName: order.servedByName,
+    actualDeliveryTime: order.actualDeliveryTime,
+    cancellationReason: order.cancellationReason,
+    refundDuePaise: order.refundDuePaise,
+  };
 }
 
-async function assertCustomerAuth(req: NextRequest) {
-  const token = getTokenFromCookies(req.headers.get('cookie'));
-  if (!token) throw new Error('UNAUTHENTICATED');
-  
-  const isValid = await verifyCustomerToken(token);
-  if (!isValid) throw new Error('UNAUTHENTICATED'); // expired or invalid JWT → treat as unauthenticated
-  
-  return token;
-}
-
-function roundMoney(value: number) {
-  return Number(value.toFixed(2));
+async function authenticatedCustomerId(): Promise<string | null> {
+  // Connect first so a cold-start database outage is not mistaken for an invalid session.
+  await connectToMongo();
+  if (!(await isCustomerAuthed())) return null;
+  return getCustomerId();
 }
 
 export async function GET(req: NextRequest) {
   try {
-    const userId = await getCustomerId();
-    if (!userId) throw new Error('UNAUTHENTICATED');
-    await assertCustomerAuth(req);
-    await connectToMongo();
+    const userId = await authenticatedCustomerId();
+    if (!userId) return NextResponse.json({ ok: false, error: 'UNAUTHENTICATED' }, { status: 401 });
 
     const url = new URL(req.url);
-    const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10));
-    const limit = Math.min(50, Math.max(1, parseInt(url.searchParams.get('limit') ?? '10', 10)));
+    const pageValue = Number(url.searchParams.get('page') ?? 1);
+    const limitValue = Number(url.searchParams.get('limit') ?? 10);
+    const page = Number.isInteger(pageValue) ? Math.max(1, pageValue) : 1;
+    const limit = Number.isInteger(limitValue) ? Math.min(50, Math.max(1, limitValue)) : 10;
     const status = url.searchParams.get('status') ?? 'all';
-
-    const filter: Record<string, unknown> = { userId };
-    if (status && status !== 'all') {
-      filter.orderStatus = status;
+    if (status !== 'all' && !(ORDER_STATUSES as readonly string[]).includes(status)) {
+      return NextResponse.json({ ok: false, error: 'INVALID_STATUS' }, { status: 400 });
     }
 
-    const skip = (page - 1) * limit;
-    const total = await Order.countDocuments(filter);
-    const orders = await Order.find(filter)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
+    const filter: Record<string, unknown> = { userId };
+    if (status !== 'all') filter.orderStatus = status;
+    const [total, orders] = await Promise.all([
+      Order.countDocuments(filter),
+      Order.find(filter)
+        .select('-idempotencyKey -requestFingerprint -adminNotes')
+        .sort({ createdAt: -1, _id: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+    ]);
 
     return NextResponse.json({
       ok: true,
-      orders: orders.map((o: any) => ({
-        id: o._id?.toString(),
-        orderNumber: o._id?.toString().slice(0, 8),
-        items: (o.items || []).map((item: any) => ({
-          name: item.name,
-          qty: item.quantity,
-          price: item.unitPrice,
-          variantName: item.variantName,
-        })),
-        subtotal: o.subtotal,
-        discount: o.discount,
-        tax: o.tax,
-        deliveryCharge: o.deliveryCharge,
-        totalAmount: o.totalAmount,
-        paymentStatus: o.paymentStatus,
-        orderStatus: o.orderStatus,
-        createdAt: o.createdAt,
-        estimatedDeliveryTime: o.estimatedDeliveryTime,
-      })),
+      orders: orders.map(publicOrder),
       total,
       page,
       pages: Math.ceil(total / limit),
-    });
-  } catch (err: any) {
-    if (err.message === 'UNAUTHENTICATED') {
-      return NextResponse.json({ ok: false, error: 'UNAUTHENTICATED' }, { status: 401 });
-    }
-    console.error('[GET /api/user/orders]', err);
-    return NextResponse.json({ ok: false, error: 'INTERNAL_ERROR' }, { status: 500 });
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
+  } catch (error) {
+    console.error('[GET /api/user/orders]', error instanceof Error ? error.message : 'Unknown error');
+    return NextResponse.json({ ok: false, error: 'DATABASE_UNAVAILABLE' }, { status: 503 });
   }
 }
 
-const createOrderSchema = z.object({
-  items: z.array(
-    z.object({
-      menuItemId: z.string().min(1),
-      variantId: z.string().min(1),
-      quantity: z.number().int().min(1).max(10),
-    })
-  ).min(1),
-  deliveryAddressId: z.string().min(1),
-  paymentMethod: z.enum(['card', 'upi', 'wallet', 'cash']),
-  couponCode: z.string().optional(),
-  specialInstructions: z.string().max(500).optional(),
-});
-
 export async function POST(req: NextRequest) {
   try {
-    const userId = await getCustomerId();
-    if (!userId) throw new Error('UNAUTHENTICATED');
-    await assertCustomerAuth(req);
-    await connectToMongo();
+    const userId = await authenticatedCustomerId();
+    if (!userId) return NextResponse.json({ ok: false, error: 'UNAUTHENTICATED' }, { status: 401 });
 
-    // Rate limit: 5 orders per minute per user to prevent duplicate clicks
-    const rateLimitResult = rateLimit(`order:${userId}`, 5, 60);
-    if (!rateLimitResult.allowed) {
+    let limited;
+    try {
+      limited = await distributedRateLimit(`checkout:${userId}`, 5, 60);
+    } catch {
+      return NextResponse.json({ ok: false, error: 'RATE_LIMIT_UNAVAILABLE' }, { status: 503 });
+    }
+    if (!limited.allowed) {
       return NextResponse.json(
-        { ok: false, error: 'TOO_MANY_REQUESTS', retryAfter: rateLimitResult.retryAfter },
-        { status: 429 }
+        { ok: false, error: 'TOO_MANY_REQUESTS', retryAfter: limited.retryAfter },
+        { status: 429, headers: { 'Retry-After': String(limited.retryAfter ?? 60) } },
       );
     }
 
-    // Idempotency key to prevent duplicate orders from refreshes / double-submits
-    const idempotencyKey = req.headers.get('Idempotency-Key');
-    if (idempotencyKey) {
-      const existing = await Order.findOne({
-        userId: new mongoose.Types.ObjectId(userId),
-        idempotencyKey,
-      }).lean();
-      if (existing) {
-        return NextResponse.json(
-          {
-            ok: true,
-            orderId: String((existing as any)._id),
-            orderNumber: String((existing as any)._id).slice(-8),
-            totalAmount: (existing as any).totalAmount,
-            estimatedDeliveryTime: new Date(Date.now() + 45 * 60000).toISOString(),
-            paymentStatus: (existing as any).paymentStatus,
-            duplicate: true,
-          },
-          { status: 200 }
-        );
-      }
-    }
-
+    const idempotencyKey = req.headers.get('idempotency-key')?.trim() ?? '';
     const payload = await req.json().catch(() => null);
-    if (!payload) {
-      return NextResponse.json({ ok: false, error: 'INVALID_JSON' }, { status: 400 });
-    }
-
     const parsed = createOrderSchema.safeParse(payload);
     if (!parsed.success) {
       return NextResponse.json(
         { ok: false, error: 'VALIDATION_FAILED', details: parsed.error.flatten() },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    const { items, deliveryAddressId, paymentMethod, couponCode, specialInstructions } = parsed.data;
-
-    const user = await User.findById(userId).lean();
-    if (!user) {
-      return NextResponse.json({ ok: false, error: 'USER_NOT_FOUND' }, { status: 404 });
-    }
-
-    const deliveryAddress = user.addresses?.find((addr: any) => String(addr._id) === deliveryAddressId);
-    if (!deliveryAddress) {
-      return NextResponse.json({ ok: false, error: 'ADDRESS_NOT_FOUND' }, { status: 404 });
-    }
-
-    const menuItems = await MenuItem.find({ _id: { $in: items.map((item) => item.menuItemId) } }).lean();
-    const menuItemMap = new Map(menuItems.map((item: any) => [String(item._id), item]));
-
-    const orderItems: Array<{
-      menuItemId: mongoose.Types.ObjectId;
-      name: string;
-      variantId: string;
-      variantName: string;
-      quantity: number;
-      unitPrice: number;
-      totalPrice: number;
-    }> = [];
-
-    let subtotal = 0;
-    for (const item of items) {
-      const menuItem = menuItemMap.get(item.menuItemId);
-      if (!menuItem || menuItem.available === false || menuItem.quantity < item.quantity) {
-        return NextResponse.json({ ok: false, error: 'MENU_ITEM_UNAVAILABLE_OR_OUT_OF_STOCK' }, { status: 400 });
-      }
-
-      const variant = (menuItem.variants || []).find((entry: any) => entry.id === item.variantId);
-      if (!variant || variant.available === false) {
-        return NextResponse.json({ ok: false, error: 'VARIANT_UNAVAILABLE' }, { status: 400 });
-      }
-
-      const lineTotal = variant.price * item.quantity;
-      subtotal += lineTotal;
-      orderItems.push({
-        menuItemId: new mongoose.Types.ObjectId(item.menuItemId),
-        name: menuItem.name,
-        variantId: item.variantId,
-        variantName: variant.name,
-        quantity: item.quantity,
-        unitPrice: variant.price,
-        totalPrice: roundMoney(lineTotal),
-      });
-    }
-
-    let discount = 0;
-    if (couponCode) {
-      const coupon = await Coupon.findOne({ code: couponCode.toUpperCase(), isActive: true }).lean();
-      if (!coupon) {
-        return NextResponse.json({ ok: false, error: 'INVALID_COUPON' }, { status: 400 });
-      }
-
-      if (new Date(coupon.expiresAt) < new Date()) {
-        return NextResponse.json({ ok: false, error: 'EXPIRED_COUPON' }, { status: 400 });
-      }
-
-      if (coupon.usageLimit !== null && typeof coupon.usageLimit === 'number' && coupon.usageCount >= coupon.usageLimit) {
-        return NextResponse.json({ ok: false, error: 'COUPON_LIMIT_REACHED' }, { status: 400 });
-      }
-
-      const eligibleSubtotal = coupon.applicableCategories?.length
-        ? orderItems.reduce((sum, orderItem) => {
-            const sourceItem = menuItemMap.get(String(orderItem.menuItemId));
-            if (!sourceItem || !coupon.applicableCategories.includes(sourceItem.category)) return sum;
-            return sum + orderItem.totalPrice;
-          }, 0)
-        : subtotal;
-
-      if (coupon.minOrderValue && subtotal < coupon.minOrderValue) {
-        return NextResponse.json({ ok: false, error: 'MIN_ORDER_NOT_MET' }, { status: 400 });
-      }
-
-      discount = coupon.discountType === 'percentage'
-        ? (eligibleSubtotal * coupon.discountValue) / 100
-        : coupon.discountValue;
-
-      if (coupon.maxDiscount !== null && typeof coupon.maxDiscount === 'number') {
-        discount = Math.min(discount, coupon.maxDiscount);
-      }
-
-      discount = Math.min(discount, subtotal);
-    }
-
-    const taxableAmount = Math.max(0, subtotal - discount);
-    const tax = roundMoney(taxableAmount * 0.18);
-    const deliveryCharge = taxableAmount >= 500 ? 0 : 50;
-    const totalAmount = roundMoney(taxableAmount + tax + deliveryCharge);
-
-    const order = await Order.create({
-      userId: new mongoose.Types.ObjectId(userId),
-      items: orderItems,
-      subtotal: roundMoney(subtotal),
-      discount: roundMoney(discount),
-      couponCode: couponCode ? couponCode.toUpperCase() : null,
-      tax,
-      deliveryCharge,
-      totalAmount,
-      paymentMethod,
-      paymentStatus: 'pending',
-      orderStatus: 'pending',
-      statusHistory: [{ status: 'pending', timestamp: new Date(), note: 'Order placed' }],
-      deliveryAddress: {
-        street: deliveryAddress.street,
-        city: deliveryAddress.city,
-        state: deliveryAddress.state,
-        zipCode: deliveryAddress.zipCode,
-        phone: deliveryAddress.phone,
-      },
-      specialInstructions: specialInstructions ?? null,
-      customerNotes: null,
-      ...(idempotencyKey ? { idempotencyKey } : {}),
-    });
-
-    if (couponCode) {
-      await Coupon.updateOne(
-        { code: couponCode.toUpperCase() },
-        {
-          $inc: { usageCount: 1 },
-          $addToSet: { usedBy: new mongoose.Types.ObjectId(userId) },
-        }
-      );
-    }
-
-    // Decrement stock and increment sold count for each item
-    for (const item of items) {
-      await MenuItem.updateOne(
-        { _id: new mongoose.Types.ObjectId(item.menuItemId) },
-        {
-          $inc: { 
-            quantity: -item.quantity,
-            quantitySold: item.quantity 
-          }
-        }
-      );
-    }
-
+    const result = await createCustomerOrder({ userId, input: parsed.data, idempotencyKey });
     return NextResponse.json(
-      {
-        ok: true,
-        orderId: String((order as any)._id),
-        orderNumber: String((order as any)._id).slice(-8),
-        totalAmount: order.totalAmount,
-        estimatedDeliveryTime: new Date(Date.now() + 45 * 60000).toISOString(),
-        paymentStatus: order.paymentStatus,
-      },
-      { status: 201 }
+      { ok: true, ...result },
+      { status: result.duplicate ? 200 : 201, headers: { 'Cache-Control': 'private, no-store' } },
     );
-  } catch (err: any) {
-    if (err.message === 'UNAUTHENTICATED') {
-      return NextResponse.json({ ok: false, error: 'UNAUTHENTICATED' }, { status: 401 });
+  } catch (error) {
+    if (error instanceof OrderServiceError) {
+      return NextResponse.json(
+        { ok: false, error: error.code, details: error.details },
+        { status: error.status },
+      );
     }
-    console.error('[POST /api/user/orders]', err);
-    return NextResponse.json({ ok: false, error: 'INTERNAL_ERROR' }, { status: 500 });
+    if (error instanceof BusinessRulesConfigurationError) {
+      return NextResponse.json(
+        { ok: false, error: 'CHECKOUT_NOT_CONFIGURED', details: { missing: error.missing } },
+        { status: 503 },
+      );
+    }
+    const message = error instanceof Error ? error.message : '';
+    if (/Transaction numbers are only allowed|replica set|Transaction support/i.test(message)) {
+      return NextResponse.json(
+        { ok: false, error: 'TRANSACTION_DATABASE_REQUIRED' },
+        { status: 503 },
+      );
+    }
+    console.error('[POST /api/user/orders]', message || 'Unknown error');
+    return NextResponse.json({ ok: false, error: 'ORDER_CREATION_FAILED' }, { status: 500 });
   }
 }

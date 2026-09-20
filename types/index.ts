@@ -4,6 +4,8 @@ export interface Variant {
   id: string;
   name: string;
   price: number;
+  pricePaise?: number;
+  costPaise?: number | null;
   available: boolean;
 }
 
@@ -15,6 +17,8 @@ export interface MenuItem {
   images?: string[];
   variants: Variant[];
   basePrice?: number;
+  basePricePaise?: number;
+  costPaise?: number | null;
   rating: number;
   reviewCount: number;
   category: Category;
@@ -24,6 +28,12 @@ export interface MenuItem {
   spicy?: boolean;
   vegetarian?: boolean;
   isNew?: boolean;
+  isNewItem?: boolean;
+  available?: boolean;
+  quantity?: number;
+  quantitySold?: number;
+  reorderPoint?: number;
+  archivedAt?: string | null;
 }
 
 export type Category =

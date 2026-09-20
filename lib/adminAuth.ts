@@ -1,10 +1,6 @@
 import { clearAdminJwtSession, isAdminJwtAuthed, setAdminJwtSession } from '@/lib/adminJwt';
 import { type AdminDoc } from '@/models/Admin';
 
-export async function setAdminSession() {
-  await setAdminJwtSession();
-}
-
 export async function setAdminSessionForAdmin(adminId: string, admin?: AdminDoc) {
   await setAdminJwtSession(adminId, admin);
 }

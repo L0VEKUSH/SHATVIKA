@@ -9,11 +9,13 @@ export default function AdminOrdersPage() {
 
   const counts = {
     all:       orders.length,
-    pending:   orders.filter(o => o.status === 'Pending').length,
-    cooking:   orders.filter(o => o.status === 'Cooking').length,
-    delivery:  orders.filter(o => o.status === 'Out for Delivery').length,
-    delivered: orders.filter(o => o.status === 'Delivered').length,
-    cancelled: orders.filter(o => o.status === 'Cancelled').length,
+    pending:   orders.filter(o => o.status === 'pending').length,
+    accepted:  orders.filter(o => o.status === 'accepted').length,
+    preparing: orders.filter(o => o.status === 'preparing').length,
+    ready:     orders.filter(o => o.status === 'ready').length,
+    delivery:  orders.filter(o => o.status === 'out_for_delivery').length,
+    delivered: orders.filter(o => o.status === 'delivered').length,
+    cancelled: orders.filter(o => o.status === 'cancelled').length,
   };
 
   return (
@@ -29,16 +31,18 @@ export default function AdminOrdersPage() {
           Order <span className="flame-text">Tracker</span>
         </h2>
         <p className="text-sm text-gray-500 mt-1">
-          Update order statuses in real-time. Expand any row to see full details.
+          Refresh persisted orders, apply valid status transitions, and expand any row for recorded details.
         </p>
       </div>
 
       {/* Status overview pills */}
-      <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-3">
         {[
           { label: 'Total',      count: counts.all,       emoji: '📋', color: 'text-white'         },
           { label: 'Pending',    count: counts.pending,   emoji: '🕐', color: 'text-yellow-400'    },
-          { label: 'Cooking',    count: counts.cooking,   emoji: '👨‍🍳', color: 'text-orange-400' },
+          { label: 'Accepted',   count: counts.accepted,  emoji: '👍', color: 'text-amber-300'      },
+          { label: 'Preparing',  count: counts.preparing, emoji: '👨‍🍳', color: 'text-orange-400' },
+          { label: 'Ready',      count: counts.ready,     emoji: '🔔', color: 'text-purple-300'    },
           { label: 'Delivery',   count: counts.delivery,  emoji: '🛵', color: 'text-blue-400'      },
           { label: 'Delivered',  count: counts.delivered, emoji: '✅', color: 'text-green-400'     },
           { label: 'Cancelled',  count: counts.cancelled, emoji: '❌', color: 'text-red-400'       },

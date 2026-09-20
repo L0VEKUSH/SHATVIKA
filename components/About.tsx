@@ -1,22 +1,15 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Award, MapPin, Heart, TrendingUp } from 'lucide-react';
+import { Award } from 'lucide-react';
 import { useAdmin } from '@/context/AdminContext';
-
-const achievements = [
-  { icon: Award,       label: 'Best Fast Food',        sub: 'Local Favorite' },
-  { icon: Heart,       label: '98% Customer Love',     sub: 'Verified Reviews' },
-  { icon: MapPin,      label: 'Locally Sourced',       sub: 'Fresh Ingredients' },
-  { icon: TrendingUp,  label: 'Fast Delivery',         sub: 'Hot & Fresh' },
-];
 
 export default function About() {
   const { isLoading, teamMembers, stats, features } = useAdmin();
   const badgeStats = stats.slice(0, 3);
-  const displayAchievements = features.length >= 4
-    ? features.slice(0, 4).map(f => ({ icon: Award, label: f.title, sub: f.description.slice(0, 40) }))
-    : achievements;
+  const displayAchievements = features
+    .slice(0, 4)
+    .map(f => ({ icon: Award, label: f.title, sub: f.description.slice(0, 40) }));
 
   if (isLoading) {
     return (
@@ -63,22 +56,22 @@ export default function About() {
             </h2>
             <div className="space-y-4 text-gray-400 text-sm md:text-base leading-relaxed">
               <p>
-                SHATVIKA CORNER started with a simple belief: fast food can be fresh, honest, and made with care.
-                Every dish is prepared to order using quality ingredients and recipes perfected in our kitchen.
+                SHATVIKA CORNER brings its menu, ordering, and customer account experience together in one place.
+                Current items, prices, and availability are read from the same catalogue used at checkout.
               </p>
               <p>
-                From flame-grilled burgers to handmade momos, we bring bold flavors and warm hospitality
-                to every plate — delivered hot to your door in Aligarh.
+                Browse the live menu for current product details. Delivery availability, charges, and taxes are
+                confirmed from the configured business rules before an order is accepted.
               </p>
             </div>
 
             {/* Values */}
             <div className="grid grid-cols-2 gap-4 mt-8">
               {[
-                { emoji: '🌿', label: 'Farm to Flame',   desc: 'Local sourcing always' },
-                { emoji: '🔥', label: 'Real Fire',        desc: 'No shortcuts ever'     },
-                { emoji: '💚', label: 'Community First',  desc: 'We give back'          },
-                { emoji: '⚡', label: 'Speed + Quality',  desc: 'Never a compromise'    },
+                { emoji: '📋', label: 'Live Catalogue', desc: 'Current prices and stock' },
+                { emoji: '🔒', label: 'Secure Account', desc: 'Protected customer access' },
+                { emoji: '🧾', label: 'Order History', desc: 'Persisted order details' },
+                { emoji: '⭐', label: 'Moderated Reviews', desc: 'Approved feedback only' },
               ].map(v => (
                 <div key={v.label} className="glass rounded-xl p-4 border border-white/6">
                   <span className="text-2xl">{v.emoji}</span>
@@ -113,8 +106,8 @@ export default function About() {
                 >
                   🔥
                 </motion.span>
-                <p className="text-3xl font-black flame-text"> Since 2026</p>
-                <p className="text-gray-500 text-sm">Serving fire with love</p>
+                <p className="text-3xl font-black flame-text">SHATVIKA CORNER</p>
+                <p className="text-gray-500 text-sm">Current information, clearly presented</p>
               </div>
 
               {/* Background glow */}

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title description">
+  <title id="title">SHATVIKA CORNER</title>
+  <desc id="description">SC monogram on an orange gradient</desc>
+  <defs><linearGradient id="flame" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff4500"/><stop offset="1" stop-color="#ffd700"/></linearGradient></defs>
+  <rect width="512" height="512" rx="112" fill="#0a0a0a"/>
+  <rect x="28" y="28" width="456" height="456" rx="92" fill="url(#flame)"/>
+  <text x="256" y="310" text-anchor="middle" font-family="Arial, sans-serif" font-size="190" font-weight="800" fill="#0a0a0a">SC</text>
+</svg>

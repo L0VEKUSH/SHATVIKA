@@ -1,30 +1,69 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 import { useCart } from '@/context/CartContext';
 import { Package, MapPin, Heart, ArrowRight, User as UserIcon } from 'lucide-react';
 import { formatINR } from '@/lib/currency';
+import { ApiClientError, apiRequest } from '@/lib/apiClient';
+import { isOrderStatus, type OrderStatus } from '@/lib/orders/stateMachine';
+
+type RecentOrder = {
+  id: string;
+  orderNumber?: string;
+  orderStatus: OrderStatus;
+  createdAt: string;
+  totalAmount: number;
+  items: unknown[];
+};
+
+const STATUS_LABELS: Record<OrderStatus, string> = {
+  placed: 'Placed',
+  pending: 'Pending',
+  accepted: 'Accepted',
+  preparing: 'Preparing',
+  ready: 'Ready',
+  out_for_delivery: 'Out for delivery',
+  delivered: 'Delivered',
+  served: 'Served',
+  cancelled: 'Cancelled',
+};
 
 export default function CustomerDashboard() {
   const { customer, isLoading: authLoading } = useAuth();
   const { wishlist } = useCart();
-  const [recentOrders, setRecentOrders] = useState<any[]>([]);
+  const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
+  const [ordersError, setOrdersError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (customer) {
-      fetch('/api/user/orders')
-        .then(res => res.json())
-        .then(data => {
-          if (data.ok) {
-            setRecentOrders(data.orders.slice(0, 3) || []);
-          }
-        })
-        .finally(() => setLoadingOrders(false));
+  const loadRecentOrders = useCallback(async () => {
+    if (!customer) {
+      setRecentOrders([]);
+      setLoadingOrders(false);
+      return;
+    }
+    setLoadingOrders(true);
+    setOrdersError(null);
+    try {
+      const data = await apiRequest<{ ok: true; orders: Array<Omit<RecentOrder, 'orderStatus'> & { orderStatus: string }> }>(
+        '/api/user/orders?limit=3',
+      );
+      setRecentOrders(data.orders.flatMap((order) => (
+        isOrderStatus(order.orderStatus) ? [{ ...order, orderStatus: order.orderStatus }] : []
+      )));
+    } catch (error) {
+      setOrdersError(error instanceof ApiClientError && error.status === 503
+        ? 'Orders are temporarily unavailable.'
+        : 'Recent orders could not be loaded.');
+    } finally {
+      setLoadingOrders(false);
     }
   }, [customer]);
+
+  useEffect(() => {
+    void loadRecentOrders();
+  }, [loadRecentOrders]);
 
   if (authLoading || (customer && loadingOrders)) {
     return (
@@ -106,7 +145,7 @@ export default function CustomerDashboard() {
           </div>
           <div className="mt-4">
             <p className="text-3xl font-black text-white">{wishlist.length}</p>
-            <Link href="/menu" className="text-pink-400 text-sm font-semibold hover:underline mt-2 inline-flex items-center gap-1">
+            <Link href="/#menu" className="text-pink-400 text-sm font-semibold hover:underline mt-2 inline-flex items-center gap-1">
               Explore Menu <ArrowRight className="w-4 h-4" />
             </Link>
           </div>
@@ -120,7 +159,14 @@ export default function CustomerDashboard() {
           <Link href="/customer/orders" className="text-sm text-[#FF8C00] hover:underline font-semibold">View all</Link>
         </div>
         
-        {recentOrders.length === 0 ? (
+        {ordersError ? (
+          <div role="alert" className="rounded-xl border border-red-500/20 bg-red-500/5 p-5 text-center">
+            <p className="text-sm text-red-200">{ordersError}</p>
+            <button type="button" onClick={() => void loadRecentOrders()} className="mt-3 text-sm font-semibold text-[#FF8C00] hover:underline">
+              Try again
+            </button>
+          </div>
+        ) : recentOrders.length === 0 ? (
           <div className="text-center py-8">
             <Package className="w-12 h-12 text-white/20 mx-auto mb-3" />
             <p className="text-gray-400">No recent orders found.</p>
@@ -132,7 +178,7 @@ export default function CustomerDashboard() {
                 <div>
                   <p className="text-white font-bold flex items-center gap-2">
                     Order #{order.orderNumber || order.id.slice(-8)}
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 uppercase tracking-wider">{order.orderStatus}</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 uppercase tracking-wider">{STATUS_LABELS[order.orderStatus]}</span>
                   </p>
                   <p className="text-sm text-gray-400 mt-1">{new Date(order.createdAt).toLocaleDateString()}</p>
                 </div>

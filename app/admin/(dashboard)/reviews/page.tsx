@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Check, X, Trash2, Image as ImageIcon, MessageSquare } from 'lucide-react';
 import Image from 'next/image';
+import { apiRequest } from '@/lib/apiClient';
 
 type AdminReview = {
   id: string;
@@ -25,18 +26,17 @@ export default function AdminReviewsPage() {
   const [tab, setTab] = useState<Tab>('pending');
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
 
   const fetchReviews = async (status: Tab) => {
     setLoading(true);
+    setError(null);
     try {
-      const res = await fetch(`/api/reviews?status=${status}&limit=100`, {
-        credentials: 'include',
-      });
-      if (!res.ok) throw new Error('Failed to fetch');
-      const data = await res.json();
+      const data = await apiRequest<{ reviews?: AdminReview[] }>(`/api/reviews?scope=admin&status=${status}&limit=100`);
       setReviews((data?.reviews ?? []) as AdminReview[]);
-    } catch {
+    } catch (requestError) {
       setReviews([]);
+      setError(requestError instanceof Error ? requestError.message : 'Reviews could not be loaded.');
     } finally {
       setLoading(false);
     }
@@ -50,15 +50,15 @@ export default function AdminReviewsPage() {
 
   const patchStatus = async (id: string, status: 'approved' | 'rejected') => {
     setActionLoadingId(id);
+    setError(null);
     try {
-      const res = await fetch('/api/reviews', {
+      await apiRequest('/api/reviews', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ id, status }),
+        body: { id, status },
       });
-      if (!res.ok) throw new Error('Update failed');
       await fetchReviews(tab);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Review status could not be updated.');
     } finally {
       setActionLoadingId(null);
     }
@@ -68,15 +68,15 @@ export default function AdminReviewsPage() {
     const replyText = replyDrafts[id]?.trim();
     if (!replyText) return;
     setActionLoadingId(id);
+    setError(null);
     try {
-      const res = await fetch('/api/reviews', {
+      await apiRequest('/api/reviews', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ id, replyText }),
+        body: { id, replyText },
       });
-      if (!res.ok) throw new Error('Reply failed');
       await fetchReviews(tab);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Reply could not be saved.');
     } finally {
       setActionLoadingId(null);
     }
@@ -85,13 +85,14 @@ export default function AdminReviewsPage() {
   const deleteReview = async (id: string) => {
     if (!confirm('Delete this review permanently?')) return;
     setActionLoadingId(id);
+    setError(null);
     try {
-      const res = await fetch(`/api/reviews?id=${encodeURIComponent(id)}`, {
+      await apiRequest(`/api/reviews?id=${encodeURIComponent(id)}`, {
         method: 'DELETE',
-        credentials: 'include',
       });
-      if (!res.ok) throw new Error('Delete failed');
       await fetchReviews(tab);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Review could not be deleted.');
     } finally {
       setActionLoadingId(null);
     }
@@ -121,6 +122,7 @@ export default function AdminReviewsPage() {
       </div>
 
       <div className="glass rounded-2xl p-6 border border-white/8">
+        {error && <p role="alert" className="mb-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-300">{error}</p>}
         {loading ? (
           <p className="text-gray-400 text-sm">Loading reviews…</p>
         ) : reviews.length === 0 ? (

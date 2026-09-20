@@ -4,7 +4,10 @@ export type UserDoc = {
   _id: mongoose.Types.ObjectId;
   email: string;
   password: string;
+  passwordResetToken?: string | null;
+  passwordResetExpires?: Date | null;
   passwordVersion: number;
+  isActive?: boolean;
   fullName: string;
   phone?: string;
   profilePhoto?: string;
@@ -103,11 +106,12 @@ const userSchema = new Schema(
       index: true,
     },
     // bcrypt hash string
-    password: { type: String, required: true },
+    password: { type: String, required: true, select: false },
     passwordResetToken: { type: String, default: null, select: false },
     passwordResetExpires: { type: Date, default: null, select: false },
     // Incremented when password changes; used in fingerprint to invalidate old tokens
-    passwordVersion: { type: Number, default: 0 },
+    passwordVersion: { type: Number, default: 0, select: false },
+    isActive: { type: Boolean, default: true },
     fullName: { type: String, required: true, trim: true },
     phone: {
       type: String,
@@ -128,21 +132,20 @@ const userSchema = new Schema(
 );
 
 // Enforce single default address per user
-userSchema.pre('save', function(this: any, next: any) {
+userSchema.pre('save', function() {
   if (this.addresses && this.addresses.length > 0) {
-    const defaultAddresses = this.addresses.filter((a: any) => a.isDefault);
+    const defaultAddresses = this.addresses.filter(address => address.isDefault);
     
     if (defaultAddresses.length > 1) {
       // Keep only first as default, reset others
-      this.addresses.forEach((addr: any, idx: number) => {
-        addr.isDefault = idx === 0;
+      this.addresses.forEach((address, index) => {
+        address.isDefault = index === 0;
       });
     } else if (defaultAddresses.length === 0 && this.addresses.length > 0) {
       // No default set, make first one default
       this.addresses[0].isDefault = true;
     }
   }
-  next();
 });
 
 
@@ -153,14 +156,15 @@ userSchema.set('toJSON', {
     delete anyRet._id;
     delete anyRet.password;
     delete anyRet.passwordVersion;
+    delete anyRet.passwordResetToken;
+    delete anyRet.passwordResetExpires;
     delete anyRet.__v;
     return anyRet;
   },
 });
 
-// Indexes for common queries
-userSchema.index({ email: 1 });
-userSchema.index({ phone: 1 });
+// Email/phone indexes are declared on the fields above. Re-declaring them here
+// creates conflicting index specifications under Mongoose 9.
 userSchema.index({ createdAt: -1 });
 
 export const User: Model<any> =

@@ -52,13 +52,17 @@ export async function connectToMongo(): Promise<typeof mongoose> {
         cache.conn = m;
         return m;
       })
-      .catch((err: Error) => {
+      .catch((err: Error & { code?: unknown }) => {
         cache.promise = null; // Allow retry on next call
-        console.error('[mongoose] Connection error:', err.message);
+        const code = typeof err.code === 'string' || typeof err.code === 'number' ? err.code : undefined;
+        console.error(JSON.stringify({
+          level: 'error',
+          event: 'mongodb_connection_failure',
+          error: { name: err.name || 'Error', ...(code === undefined ? {} : { code }) },
+        }));
         throw err;
       });
   }
 
   return cache.promise;
 }
-

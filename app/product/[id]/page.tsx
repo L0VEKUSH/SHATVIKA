@@ -10,9 +10,10 @@ import {
 } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 import { useAuth } from '@/context/AuthContext';
+import { ApiClientError, apiRequest } from '@/lib/apiClient';
 
 /* ── Types ─────────────────────────────────────────── */
-interface VariantType { id: string; name: string; price: number; available: boolean; }
+interface VariantType { id: string; _id?: string; name: string; price: number; available: boolean; }
 interface ProductType {
   _id: string; id?: string; name: string; description: string;
   ingredients?: string[]; images?: string[]; variants: VariantType[];
@@ -150,11 +151,8 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
   const { isAuthenticated, customer } = useAuth();
 
   const loadReviews = useCallback(async (productId: string) => {
-    const revRes = await fetch(`/api/reviews?menuItemId=${productId}&status=approved`);
-    if (revRes.ok) {
-      const revData = await revRes.json();
-      setReviews(revData.reviews || []);
-    }
+    const revData = await apiRequest<{ reviews: ReviewType[] }>(`/api/reviews?menuItemId=${productId}&status=approved`);
+    setReviews(revData.reviews || []);
   }, []);
 
   /* Fetch product */
@@ -162,23 +160,18 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
     async function load() {
       try {
         setLoading(true);
-        const res = await fetch(`/api/menu/${id}`);
-        if (!res.ok) throw new Error('Not found');
-        const data = await res.json();
+        const data = await apiRequest<ProductType>(`/api/menu/${id}`);
         setProduct(data);
         if (data.variants?.length > 0) {
-          setSelectedVariantId(data.variants[0].id || data.variants[0]._id);
+          setSelectedVariantId(data.variants[0].id || data.variants[0]._id || 'base');
         }
         // Fetch related items from same category
-        const menuRes = await fetch('/api/menu');
-        if (menuRes.ok) {
-          const allItems = await menuRes.json();
-          setRelatedItems(
-            allItems
-              .filter((i: ProductType) => i.category === data.category && (i._id || i.id) !== id)
-              .slice(0, 4)
-          );
-        }
+        const allItems = await apiRequest<ProductType[]>('/api/menu');
+        setRelatedItems(
+          allItems
+            .filter((i: ProductType) => i.category === data.category && (i._id || i.id) !== id)
+            .slice(0, 4)
+        );
         // Fetch reviews for this product
         await loadReviews(id);
       } catch {
@@ -195,28 +188,26 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
     setReviewSubmitting(true);
     setReviewError('');
     try {
-      const res = await fetch('/api/reviews', {
+      await apiRequest('/api/reviews', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
+        body: {
           menuItemId: id,
           rating: reviewRating,
           text: reviewText.trim(),
-        }),
+        },
       });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        const msg = data?.message || data?.error || 'Failed to submit review';
-        throw new Error(msg);
-      }
       setReviewSuccess(true);
       setReviewText('');
       setReviewRating(5);
       setShowReviewForm(false);
       setTimeout(() => setReviewSuccess(false), 3000);
     } catch (err) {
-      setReviewError(err instanceof Error ? err.message : 'Failed to submit review');
+      const messages: Record<string, string> = {
+        UNAUTHENTICATED: 'Please sign in to submit a review.',
+        NOT_VERIFIED: 'A delivered order containing this item is required.',
+        DUPLICATE_REVIEW: 'You already reviewed this item.',
+      };
+      setReviewError(err instanceof ApiClientError ? messages[err.code] ?? err.message : err instanceof Error ? err.message : 'Failed to submit review');
     } finally {
       setReviewSubmitting(false);
     }
@@ -224,13 +215,11 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
 
   const toggleHelpful = async (reviewId: string, currentlyHelpful: boolean) => {
     try {
-      const res = await fetch(`/api/reviews/${reviewId}/helpful`, {
+      await apiRequest(`/api/reviews/${reviewId}/helpful`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ helpful: !currentlyHelpful }),
+        body: { helpful: !currentlyHelpful },
       });
-      if (res.ok) await loadReviews(id);
+      await loadReviews(id);
     } catch {
       // ignore
     }
@@ -505,7 +494,7 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
                 <div className="text-center">
                   <LogIn className="w-6 h-6 text-[#FF8C00] mx-auto mb-2" />
                   <p className="text-xs text-gray-400 mb-3">Sign in with a delivered order to review.</p>
-                  <Link href={`/auth/login?from=/product/${id}`} className="btn-flame inline-flex px-4 py-2 text-xs">Sign In</Link>
+                  <Link href={`/auth/login?returnTo=${encodeURIComponent(`/product/${id}`)}`} className="btn-flame inline-flex px-4 py-2 text-xs">Sign In</Link>
                 </div>
               ) : (
                 <div className="space-y-3">
