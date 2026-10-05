@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { ApiClientError, apiRequest } from '@/lib/apiClient';
+import { addCartItem } from '@/lib/cartState';
 import { useAdmin } from '@/context/AdminContext';
 import { useAuth } from '@/context/AuthContext';
 import type { CartItem, MenuItem, Variant } from '@/types';
@@ -30,7 +31,7 @@ interface CartContextType {
   appliedCoupon: AppliedCoupon | null;
   isCartSyncing: boolean;
   cartPersistenceError: string | null;
-  addToCart: (item: MenuItem, variant: Variant) => void;
+  addToCart: (item: MenuItem, variant: Variant, quantity?: number) => void;
   removeFromCart: (cartItemId: string) => void;
   updateQuantity: (cartItemId: string, quantity: number) => void;
   clearCart: () => void;
@@ -150,6 +151,10 @@ function hydrateLines(lines: ServerLine[], products: MenuItem[]): CartItem[] {
       variantName: variant.name,
       variantPrice: variant.price,
       quantity: line.quantity,
+      inventoryMode: product.inventoryMode,
+      availableQuantity: product.inventoryMode === 'tracked' && Number.isSafeInteger(product.quantity)
+        ? Number(product.quantity)
+        : null,
       emoji: product.emoji,
       gradientClass: product.gradientClass,
     }];
@@ -161,6 +166,7 @@ function persistenceMessage(error: unknown) {
     const messages: Record<string, string> = {
       CHECKOUT_NOT_CONFIGURED: 'Cart is saved on this device; server sync awaits configured checkout rules.',
       INSUFFICIENT_STOCK: 'Cart was kept on this device, but current stock cannot support every quantity.',
+      INVENTORY_NOT_CONFIGURED: 'Cart was kept on this device; an administrator must configure inventory for one item.',
       MENU_ITEM_UNAVAILABLE: 'Cart was kept on this device; one item is no longer available.',
       VARIANT_UNAVAILABLE: 'Cart was kept on this device; one selected option is no longer available.',
       DATABASE_UNAVAILABLE: 'Cart was kept on this device while account sync is unavailable.',
@@ -303,28 +309,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
-  const addToCart = useCallback((item: MenuItem, variant: Variant) => {
+  const addToCart = useCallback((item: MenuItem, variant: Variant, quantity = 1) => {
     setAppliedCoupon(null);
-    const cartItemId = `${item.id}-${variant.id}`;
-    setItems((current) => {
-      const existing = current.find((entry) => entry.id === cartItemId);
-      if (existing) {
-        return current.map((entry) => entry.id === cartItemId
-          ? { ...entry, quantity: Math.min(100, entry.quantity + 1) }
-          : entry);
-      }
-      return [...current, {
-        id: cartItemId,
-        menuItemId: item.id,
-        menuItemName: item.name,
-        variantId: variant.id,
-        variantName: variant.name,
-        variantPrice: variant.price,
-        quantity: 1,
-        emoji: item.emoji,
-        gradientClass: item.gradientClass,
-      }];
-    });
+    setItems((current) => addCartItem(current, item, variant, quantity));
   }, []);
 
   const removeFromCart = useCallback((cartItemId: string) => {

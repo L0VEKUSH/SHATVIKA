@@ -3,11 +3,13 @@ import { z } from 'zod';
 import { OrderServiceError, transitionOrder } from '@/lib/orders/service';
 import { distributedRateLimit } from '@/lib/rateLimit';
 import { getWorkerSessionState } from '@/lib/workerJwt';
+import { operationalReasonSchema, validationErrorResponse } from '@/lib/validation';
+import { logServerError } from '@/lib/apiError';
 
 const updateSchema = z.object({
   orderStatus: z.enum(['accepted', 'preparing', 'ready', 'served', 'cancelled']),
   expectedVersion: z.number().int().nonnegative(),
-  reason: z.string().trim().min(3).max(300).optional(),
+  reason: operationalReasonSchema.optional(),
   note: z.string().trim().max(500).optional(),
 }).strict().superRefine((value, context) => {
   if (value.orderStatus === 'cancelled' && !value.reason) {
@@ -49,7 +51,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
     const parsed = updateSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
-      return NextResponse.json({ ok: false, error: 'VALIDATION_FAILED', details: parsed.error.flatten() }, { status: 400 });
+      return validationErrorResponse(parsed.error, 'Check the status update and provide a valid reason when cancelling.');
     }
     const { id } = await params;
     const order = await transitionOrder({
@@ -66,6 +68,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (error instanceof OrderServiceError) {
       return NextResponse.json({ ok: false, error: error.code, details: error.details }, { status: error.status });
     }
+    logServerError({ route: 'PATCH /api/counter/orders/:id', err: error, requestId: request.headers.get('x-request-id') });
     return NextResponse.json({ ok: false, error: 'COUNTER_UPDATE_FAILED' }, { status: 500 });
   }
 }

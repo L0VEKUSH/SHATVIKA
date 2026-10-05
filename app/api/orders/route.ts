@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminSessionState } from '@/lib/adminJwt';
+import { logServerError } from '@/lib/apiError';
 import { connectToMongo } from '@/lib/mongoose';
 import { ORDER_STATUSES } from '@/lib/orders/stateMachine';
 import { Order } from '@/models/Order';
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest) {
       { headers: { 'Cache-Control': 'private, no-store' } },
     );
   } catch (error) {
-    console.error('[GET /api/orders]', error instanceof Error ? error.message : 'Unknown error');
+    logServerError({ route: 'GET /api/orders', err: error, requestId: request.headers.get('x-request-id') });
     return NextResponse.json({ ok: false, error: 'DATABASE_UNAVAILABLE' }, { status: 503 });
   }
 }

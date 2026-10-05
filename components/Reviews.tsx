@@ -12,18 +12,20 @@ import { ApiClientError, apiRequest } from '@/lib/apiClient';
 /* ── Utilities ─────────────────────────────────── */
 function Stars({ rating, interactive = false, onChange }: { rating: number; interactive?: boolean; onChange?: (r: number) => void }) {
   return (
-    <div className="flex items-center gap-1">
-      {Array.from({ length: 5 }, (_, i) => (
+    <div className="flex items-center gap-1" role={interactive ? 'group' : 'img'} aria-label={`${rating} out of 5 stars`}>
+      {Array.from({ length: 5 }, (_, i) => interactive ? (
         <button
           key={i}
-          onClick={() => interactive && onChange?.(i + 1)}
-          className={interactive ? 'cursor-pointer' : ''}
-          disabled={!interactive}
+          type="button"
+          onClick={() => onChange?.(i + 1)}
+          className="cursor-pointer rounded-sm"
+          aria-label={`Rate ${i + 1} out of 5`}
+          aria-pressed={rating === i + 1}
         >
-          <Star
-            className={`w-5 h-5 transition-colors ${i < rating ? 'fill-[#FFD700] text-[#FFD700]' : 'text-gray-700'}`}
-          />
+          <Star aria-hidden="true" className={`w-5 h-5 transition-colors ${i < rating ? 'fill-[#FFD700] text-[#FFD700]' : 'text-gray-700'}`} />
         </button>
+      ) : (
+        <Star key={i} aria-hidden="true" className={`w-5 h-5 transition-colors ${i < rating ? 'fill-[#FFD700] text-[#FFD700]' : 'text-gray-700'}`} />
       ))}
     </div>
   );
@@ -83,7 +85,11 @@ function ReviewForm({ onSubmit }: { onSubmit: () => void }) {
         await apiRequest('/api/upload', { method: 'DELETE', body: { assetId: previousAssetId } }).catch(() => undefined);
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to upload image');
+      setError(
+        err instanceof ApiClientError && err.code === 'UPLOAD_STORAGE_NOT_CONFIGURED'
+          ? 'Photo uploads are currently unavailable. You can still submit a rating and text-only review.'
+          : err instanceof Error ? err.message : 'Failed to upload image',
+      );
     } finally {
       setImageUploading(false);
     }
@@ -118,7 +124,7 @@ function ReviewForm({ onSubmit }: { onSubmit: () => void }) {
     } catch (err: unknown) {
       const messages: Record<string, string> = {
         UNAUTHENTICATED: 'Please sign in to submit a review.',
-        NOT_VERIFIED: 'Only verified customers with a delivered order can review.',
+        NOT_VERIFIED: 'Only verified customers with a fulfilled order can review.',
         DUPLICATE_REVIEW: 'You have already submitted a review.',
         MEDIA_ASSET_NOT_AVAILABLE: 'The review attachment is no longer available. Upload it again.',
         TRANSACTION_DATABASE_REQUIRED: 'Review submission is temporarily unavailable because safe database transactions are not configured.',
@@ -145,7 +151,7 @@ function ReviewForm({ onSubmit }: { onSubmit: () => void }) {
         <LogIn className="w-8 h-8 text-[#FF8C00] mx-auto mb-4" />
         <h3 className="text-lg font-black text-white mb-2">Sign in to Review</h3>
         <p className="text-gray-400 text-sm mb-6">
-          Only verified customers who have received a delivered order can share a review.
+          Only verified customers who have collected a fulfilled order can share a review.
         </p>
         <Link href="/auth/login?returnTo=%2F%23reviews" className="btn-flame inline-flex px-6 py-2.5 text-sm">
           Sign In
@@ -183,7 +189,7 @@ function ReviewForm({ onSubmit }: { onSubmit: () => void }) {
 
       <form onSubmit={handleSubmit} className="space-y-5">
         <div>
-          <label className="block text-sm font-semibold text-white mb-2">Rating</label>
+          <span className="block text-sm font-semibold text-white mb-2">Rating</span>
           <Stars rating={rating} interactive onChange={setRating} />
         </div>
 

@@ -9,6 +9,7 @@ import {
   sendPasswordResetEmail,
 } from '@/lib/passwordReset';
 import { authRateLimit } from '@/lib/authRateLimit';
+import { logServerError } from '@/lib/apiError';
 import { User } from '@/models/User';
 
 const forgotSchema = z.object({ email: z.string().trim().email().max(255) }).strict();
@@ -77,12 +78,12 @@ export async function POST(request: Request) {
         { _id: user._id, passwordResetToken: tokenHash },
         { $set: { passwordResetToken: null, passwordResetExpires: null } },
       ).catch(() => undefined);
-      console.error('[ForgotPassword] Email provider did not accept the request:', error instanceof Error ? error.message : 'unknown error');
+      logServerError({ route: 'POST /api/auth/forgot-password delivery', err: error, requestId: request.headers.get('x-request-id') });
     }
 
     return NextResponse.json({ ok: true, message: acceptedMessage }, { status: 202 });
   } catch (error) {
-    console.error('[ForgotPassword] Request failed:', error instanceof Error ? error.message : 'unknown error');
+    logServerError({ route: 'POST /api/auth/forgot-password', err: error, requestId: request.headers.get('x-request-id') });
     return NextResponse.json(
       { ok: false, error: 'RESET_REQUEST_FAILED', message: 'Password reset is temporarily unavailable.' },
       { status: 503 },

@@ -3,7 +3,8 @@ import mongoose, { Schema, type Model } from 'mongoose';
 const paymentEventSchema = new Schema(
   {
     orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', required: true, index: true },
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
+    guestSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'GuestSession', default: null, index: true },
     type: {
       type: String,
       enum: ['cash_collected', 'payment_captured', 'payment_failed', 'refund_succeeded', 'refund_failed'],

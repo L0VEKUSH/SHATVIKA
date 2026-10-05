@@ -1,11 +1,29 @@
 # SHATVIKA CORNER repair and verification report
 
-Date: 2026-09-20 (Asia/Kolkata)
+Date: 2026-09-20; follow-ups verified 2026-09-26 and 2026-09-27 (Asia/Kolkata)
 Workspace: `C:\Users\ASUS\Downloads\SHATVIKA CORNER`
-Branch/base commit: `master` / `3fc075ee6319741231e2529facee94afc8acacf8`
+Branch/base commits: `master` / initial audit `3fc075ee6319741231e2529facee94afc8acacf8`; follow-up base `ed91b51a33b68273d9907838b020dcaaf0d31012`
 Runtime used: Node `v24.13.0`, npm `11.6.2`, Windows PowerShell
 
 This report compares the same acceptance criteria before and after the repair and the subsequent counter-token extension. It does not claim production readiness: live email, durable storage, browser accessibility, deployment, representative-load checks, and a real payment-gateway sandbox remain unverified.
+
+## 2026-09-26 follow-up
+
+- Fixed product-detail quantity handling so the selected quantity reaches the shared cart, made Buy Now open the existing confirmation cart, and replaced the inert share control with Web Share/clipboard feedback.
+- Corrected verified-purchase review eligibility for new counter orders in `served` state while retaining legacy `delivered` records.
+- Removed the obsolete precise-geolocation prompt and aligned public copy with counter collection and zero delivery availability.
+- Added mobile customer navigation; keyboard/focus trapping, Escape handling, dialog semantics, labels, and visible action errors across the public/admin navigation and gallery workflow.
+- Extended redacted structured exception logging to the remaining reviewed API routes and broadened middleware matching so public pages receive the same production security headers as API/account routes.
+- Added a professional README, security policy, architecture guide, cart/review regression tests, and a reusable local HTTP/security smoke runner.
+- `GET /api/health` confirmed MongoDB `ok` for the configured `SHATVIKA` database. Overall readiness remains `503 not_ready` because the local file intentionally lacks deployable HTTPS canonical URLs, independent 32+ byte production secrets, and an owner-confirmed `TAX_RATE_BASIS_POINTS`. The production admin login fails closed with 503 under that invalid secret configuration; in development, CSRF-protected invalid customer and admin credentials both returned 401.
+- Headless Chrome rendered the public app at 390x844 and 1440x1000 with the title, main landmark, and counter-only notice present and no captured CSP/uncaught-runtime error signals. This is a public-page smoke check, not a full authenticated E2E or accessibility audit.
+- No customer, order, payment, product, or other business record was modified during this follow-up. Invalid-login probes may create/refresh their expected distributed rate-limit buckets.
+
+### 2026-09-27 checkout/media attribution
+
+`UPLOAD_STORAGE_NOT_CONFIGURED` was traced exclusively to `/api/upload`; the cart posts counter-order JSON to `/api/user/orders`, and the order route/service do not import media storage. Responses now carry an operation header and typed client errors retain the request URL/method, correlation ID, and operation so unrelated failures can be attributed correctly. Review/gallery uploads show an honest disabled message without affecting ordering.
+
+An isolated route test proved counter checkout succeeds with all media-provider variables absent, creates one `pending`/unpaid order with zero delivery charge, and returns the same order/token for an identical idempotent retry. A separate upload-route test proved a real authenticated upload still returns the expected 503 configuration error. With the current local environment, the actual authenticated checkout blocker is the deliberately missing `TAX_RATE_BASIS_POINTS`, which produces `CHECKOUT_NOT_CONFIGURED`; no tax value was invented.
 
 ## Fixed acceptance criteria
 
@@ -73,7 +91,7 @@ The 10 report tests recomputed row counts and integer-paise totals from the same
 | Report exports and reconciliation | 5% | 1.0 | 8.5 | +7.5 | 10/10 parser and reconciliation tests for real generated formats. |
 | Responsive design and accessibility | 5% | Not verified | Not verified | — | No browser/axe/visual/PDF rendering session was available. |
 | Performance and scalability | 5% | 3.0 | 6.0 | +3.0 | Query/row/time/file limits and indexes verified by inspection/tests; representative load test not run. |
-| Automated tests and regression protection | 5% | 2.0 | 8.0 | +6.0 | 77 unit + 10 replica-set integration tests and CI; browser/provider suites absent. |
+| Automated tests and regression protection | 5% | 2.0 | 8.0 | +6.0 | 83 unit + 16 replica-set integration tests and CI; complete authenticated browser/provider suites absent. |
 | Reliability, privacy, and monitoring | 5% | 3.0 | 7.0 | +4.0 | Health/rate-limit/private-cache/audit/redaction code and tests; no external alert sink verified. |
 | SEO and business-information completeness | 5% | 3.0 | 7.0 | +4.0 | Canonical/manifest/robots/sitemap and honest configurable content; owner data incomplete. |
 | Deployment, dependencies, maintainability | 5% | 4.0 | 8.0 | +4.0 | Clean install, exact runtime/deps, audit, lint, type-check, build, CI and safe migration. |
@@ -86,14 +104,16 @@ Improvement on the same verified weight: **+4.7/10**. Responsive/accessibility r
 
 | Command | Result |
 |---|---|
-| `npm ci` | exit 0; 619 packages; 41 s; 0 vulnerabilities |
+| `npm ci` | exit 0; 619 packages; about 2 min; 0 vulnerabilities (deprecated transitive-tooling notices remain) |
 | `npm run typecheck` | exit 0 |
 | `npm run lint` | exit 0; no warnings/errors (Next reports its lint-command deprecation notice) |
-| `npm run test:unit` | exit 0; 13 files, 77 tests passed after clean install; 59.57 s |
-| `npm run test:integration` | exit 0; 1 file, 10 tests passed on an isolated replica set; 12.29 s |
+| `npm run test:unit` | exit 0; 15 files, 83 tests passed (latest run 42.80 s) |
+| `npm run test:integration` | exit 0; 3 files, 16 tests passed on isolated replica sets (latest run 16.37 s) |
 | `npm exec vitest run tests/unit/reports.test.ts` | exit 0; 10 tests passed; generated CSV/XLSX/PDF reopened and inspected |
 | `npm audit --audit-level=moderate` | exit 0; 0 vulnerabilities |
 | `npm run build:production` | exit 0; Next 15.5.25 compiled, generated 45 static pages, and traced the PDF Unicode font |
+| Production HTTP smoke | public page/header/CSP checks passed; `unsafe-eval` absent; readiness and admin login correctly failed closed because local production configuration is incomplete |
+| Development HTTP/browser smoke | customer/admin invalid-login checks returned 401; mobile and desktop public renders completed without captured CSP/uncaught error signals |
 | `git diff --check` | exit 0; no whitespace errors; only expected CRLF notices |
 
 Mongoose 9.10.0 was exercised at runtime for actual user, menu/product, coupon, token-counter, order, payment, inventory/wastage, review, and contact records. The replica-set tests cover save/update middleware, authoritative snapshots, repeated-line aggregation, concurrent daily token allocation and midnight rollover, a concurrent last-stock race, coupon-cap/date races, request/payment idempotency fingerprints, rollback/compensation, duplicate worker actions, serving rules, prepared-food wastage, refunds, explicit update-pipeline opt-in, and follow-up persistence.
@@ -102,7 +122,7 @@ Mongoose 9.10.0 was exercised at runtime for actual user, menu/product, coupon, 
 
 1. No online-payment provider was selected or configured. The verified behavior is pay-at-counter: cash is recorded when received and UPI only after a worker verifies the merchant source. This is not gateway verification. A provider-specific server request, signed webhook, sandbox failure/refund, and replay suite still requires provider selection and sandbox credentials.
 2. Configure and sandbox-test Resend and Cloudinary before enabling reset-email/media features. Without complete settings, each feature reports unavailable and never simulates delivery/storage success.
-3. Run browser automation and manual review for the customer cart/auth/confirmation/token flow, worker queue/payment/preparation/serving flow, admin reconciliation, keyboard/focus, contrast, responsive sizes, chart alternatives, and rendered Unicode PDF. This is the unverified 5% scorecard area.
+3. Public mobile/desktop rendering is smoke-tested, but run authenticated browser automation and manual review for the customer cart/auth/confirmation/token flow, worker queue/payment/preparation/serving flow, admin reconciliation, keyboard/focus, contrast, tablet sizing, chart alternatives, and rendered Unicode PDF. This remains the unverified 5% scorecard area.
 4. Run representative private load tests against a non-production replica-set dataset. Analytics intentionally rejects more than 20,000 orders/10,000 supporting rows; move larger workloads to database aggregation/background object storage before raising limits.
 5. Connect structured failure events and health diagnostics to the deployment's alerting/observability sink. Verify CSP against production domains and reverse-proxy IP trust in the real topology.
 6. Owner/accountant/legal confirmation is still required for tax, cost classification, expense-period completeness, contact details, hours, collection/cancellation/refund/privacy text. The app deliberately does not invent these values. Delivery is explicitly unavailable for new orders.

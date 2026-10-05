@@ -55,9 +55,9 @@ coverage/
 # ============================
 # Upload/tmp/log cache (if present)
 # ============================
-uploads/
-uploads/tmp/
-public/uploads/
+/uploads/
+/uploads/tmp/
+/public/uploads/
 tmp/
 temp/
 .reports/

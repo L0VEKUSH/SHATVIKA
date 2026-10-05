@@ -49,7 +49,7 @@ type StatusHistoryEntry = {
   fromStatus?: OrderStatus | null;
   status: OrderStatus;
   timestamp: string;
-  actorType?: 'customer' | 'worker' | 'admin' | 'system';
+  actorType?: 'customer' | 'guest' | 'worker' | 'admin' | 'system';
   reason?: string | null;
   note?: string | null;
 };
@@ -100,6 +100,8 @@ type OrdersResponse = {
   total: number;
   page: number;
   pages: number;
+  identity: 'guest' | 'google' | 'registered';
+  historyScope: 'this_browser' | 'account';
 };
 
 const STATUS_LABELS: Record<OrderStatus, string> = {
@@ -289,7 +291,7 @@ function OrderDetails({ order }: { order: CustomerOrder }) {
                 <span className="relative mt-1 h-3 w-3 rounded-full border-2 border-[#FF8C00] bg-[#141414]" aria-hidden="true" />
                 <div>
                   <p className="text-sm font-semibold text-gray-200">{statusLabel(entry.status)}</p>
-                  <p className="text-xs text-gray-500">{formatDateTime(entry.timestamp)} · {entry.actorType === 'admin' ? 'Restaurant admin' : entry.actorType === 'worker' ? 'Counter worker' : entry.actorType === 'customer' ? 'Customer' : 'System'}</p>
+                  <p className="text-xs text-gray-500">{formatDateTime(entry.timestamp)} · {entry.actorType === 'admin' ? 'Restaurant admin' : entry.actorType === 'worker' ? 'Counter worker' : entry.actorType === 'customer' || entry.actorType === 'guest' ? 'Customer' : 'System'}</p>
                   {entry.note && <p className="mt-1 break-words text-xs text-gray-400">{entry.note}</p>}
                   {entry.reason && <p className="mt-1 break-words text-xs text-gray-400">Reason: {entry.reason}</p>}
                 </div>
@@ -323,6 +325,7 @@ export default function OrdersPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const [historyScope, setHistoryScope] = useState<'this_browser' | 'account'>('this_browser');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [cancelOrderId, setCancelOrderId] = useState<string | null>(null);
   const [cancellationReason, setCancellationReason] = useState('');
@@ -343,6 +346,7 @@ export default function OrdersPage() {
       setOrders(data.orders ?? []);
       setTotal(data.total ?? 0);
       setPages(Math.max(1, data.pages ?? 1));
+      setHistoryScope(data.historyScope ?? (customer ? 'account' : 'this_browser'));
       setLastRefreshed(new Date());
       if (targetPage > Math.max(1, data.pages ?? 1)) setPage(Math.max(1, data.pages ?? 1));
     } catch (caught) {
@@ -355,17 +359,10 @@ export default function OrdersPage() {
         setRefreshing(false);
       }
     }
-  }, []);
+  }, [customer]);
 
   useEffect(() => {
     if (authLoading) return;
-    if (!customer) {
-      requestSequence.current += 1;
-      setOrders([]);
-      setLoading(false);
-      setRefreshing(false);
-      return;
-    }
     void loadOrders(page, true);
   }, [authLoading, customer, loadOrders, page]);
 
@@ -408,21 +405,6 @@ export default function OrdersPage() {
     );
   }
 
-  if (!customer) {
-    return (
-      <div className="mx-auto max-w-xl p-6 text-center sm:p-10">
-        <div className="glass rounded-2xl p-8">
-          <Package className="mx-auto h-12 w-12 text-white/30" aria-hidden="true" />
-          <h1 className="mt-4 text-2xl font-bold text-white">Sign in to view your orders</h1>
-          <p className="mt-2 text-sm text-gray-400">Order history is private to your account.</p>
-          <Link href="/auth/login?returnTo=%2Fcustomer%2Forders" className="btn-flame mt-6 inline-flex px-6 py-3">
-            <span>Sign in</span>
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <main className="mx-auto max-w-5xl p-4 sm:p-6 lg:p-8">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -432,6 +414,11 @@ export default function OrdersPage() {
             My orders
           </h1>
           <p className="mt-1 text-sm text-gray-400">Saved order details, payment status, and recorded stage history.</p>
+          {historyScope === 'this_browser' && (
+            <p className="mt-2 max-w-2xl rounded-lg border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
+              Guest history is private to this browser. It may be lost if browser data is cleared or this guest session expires; it is not available across devices.
+            </p>
+          )}
           {lastRefreshed && <p className="mt-1 text-xs text-gray-600">Last refreshed {formatDateTime(lastRefreshed.toISOString())} ({BUSINESS_TIME_ZONE})</p>}
         </div>
         <button

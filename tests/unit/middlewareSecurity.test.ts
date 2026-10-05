@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { createCsrfToken } from '@/lib/csrf';
 import { signSessionToken } from '@/lib/sessionToken';
-import { middleware } from '@/middleware';
+import { WORKER_COOKIE_NAME } from '@/lib/workerSessionConfig';
+import { config, middleware } from '@/middleware';
 
 const SECRET = 'middleware-test-secret-longer-than-thirty-two-bytes';
 
@@ -13,6 +14,10 @@ afterEach(() => {
 });
 
 describe('request boundary security', () => {
+  it('runs on public pages so security headers are not limited to API and account routes', () => {
+    expect(config.matcher).toEqual(['/((?!_next/static|_next/image|favicon.ico).*)']);
+  });
+
   it('adds the documented security policy and a correlation identifier', async () => {
     const response = await middleware(new NextRequest('http://localhost/api/health'));
     expect(response.status).toBe(200);
@@ -86,6 +91,12 @@ describe('request boundary security', () => {
     expect(location.searchParams.get('returnTo')).toBe('/customer/orders?page=2');
   });
 
+  it('keeps same-browser guest order history public at the page boundary while API ownership remains server-enforced', async () => {
+    const response = await middleware(new NextRequest('http://localhost/orders'));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-middleware-next')).toBe('1');
+  });
+
   it('keeps the counter dashboard worker-only and rejects a customer-role token', async () => {
     process.env.WORKER_JWT_SECRET = SECRET;
     const customerToken = await signSessionToken({
@@ -93,7 +104,7 @@ describe('request boundary security', () => {
       lifetimeSeconds: 600, secret: SECRET, tokenId: 'customer-counter-boundary-test',
     });
     const rejected = await middleware(new NextRequest('http://localhost/counter', {
-      headers: { cookie: `worker_session=${customerToken}` },
+      headers: { cookie: `${WORKER_COOKIE_NAME}=${customerToken}` },
     }));
     expect(rejected.status).toBe(307);
     expect(new URL(rejected.headers.get('location') ?? 'http://invalid').pathname).toBe('/counter/login');
@@ -103,9 +114,42 @@ describe('request boundary security', () => {
       lifetimeSeconds: 600, secret: SECRET, tokenId: 'valid-worker-boundary-test',
     });
     const accepted = await middleware(new NextRequest('http://localhost/counter', {
-      headers: { cookie: `worker_session=${workerToken}` },
+      headers: { cookie: `${WORKER_COOKIE_NAME}=${workerToken}` },
     }));
     expect(accepted.status).toBe(200);
     expect(accepted.headers.get('x-middleware-next')).toBe('1');
+  });
+
+  it('redirects unauthenticated counter pages and returns JSON 401 for counter APIs', async () => {
+    process.env.WORKER_JWT_SECRET = SECRET;
+    const page = await middleware(new NextRequest('http://localhost/counter/orders?view=ready'));
+    expect(page.status).toBe(307);
+    const location = new URL(page.headers.get('location') ?? 'http://invalid');
+    expect(location.pathname).toBe('/counter/login');
+    expect(location.searchParams.get('returnTo')).toBe('/counter/orders?view=ready');
+
+    const api = await middleware(new NextRequest('http://localhost/counter/api/private', {
+      headers: { accept: 'application/json' },
+    }));
+    expect(api.status).toBe(401);
+    await expect(api.json()).resolves.toEqual({ ok: false, error: 'UNAUTHORIZED' });
+  });
+
+  it('does not make routes below the login endpoint public by prefix matching', async () => {
+    process.env.WORKER_JWT_SECRET = SECRET;
+    const response = await middleware(new NextRequest('http://localhost/counter/api/login/private', {
+      headers: { accept: 'application/json' },
+    }));
+    expect(response.status).toBe(401);
+  });
+
+  it('keeps worker logout POST-only and CSRF protected even when no session is present', async () => {
+    process.env.WORKER_JWT_SECRET = SECRET;
+    const response = await middleware(new NextRequest('http://localhost/counter/api/logout', {
+      method: 'POST',
+      headers: { accept: 'application/json' },
+    }));
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ ok: false, error: 'UNTRUSTED_ORIGIN' });
   });
 });

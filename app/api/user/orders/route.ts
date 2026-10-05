@@ -1,14 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { connectToMongo } from '@/lib/mongoose';
-import { getCustomerId, isCustomerAuthed } from '@/lib/customerAuth';
+import { logServerError, publicApiErrorMessage } from '@/lib/apiError';
 import { distributedRateLimit } from '@/lib/rateLimit';
 import { BusinessRulesConfigurationError } from '@/lib/businessRules';
 import { createCustomerOrder, OrderServiceError } from '@/lib/orders/service';
 import { ORDER_STATUSES } from '@/lib/orders/stateMachine';
+import { applyGuestSessionCookie, getGuestSessionFromRequest } from '@/lib/guestSession';
+import {
+  OrderPrincipalError,
+  orderOwnershipFilter,
+  resolveOrderPrincipal,
+  type OrderPrincipal,
+} from '@/lib/orderPrincipal';
 import { Order } from '@/models/Order';
 
 export const dynamic = 'force-dynamic';
+
+const CREATE_ORDER_HEADERS = {
+  'Cache-Control': 'private, no-store',
+  'X-Shatvika-Operation': 'counter-order',
+};
+
+function createOrderResponse(
+  body: Record<string, unknown>,
+  status: number,
+  headers?: HeadersInit,
+  principal?: OrderPrincipal | null,
+) {
+  const response = NextResponse.json(body, {
+    status,
+    headers: { ...CREATE_ORDER_HEADERS, ...headers },
+  });
+  if (principal?.kind === 'guest') applyGuestSessionCookie(response, principal.issuedSession);
+  return response;
+}
 
 const createOrderSchema = z.object({
   items: z.array(z.object({
@@ -20,6 +45,7 @@ const createOrderSchema = z.object({
   paymentMethod: z.literal('counter').default('counter'),
   couponCode: z.string().trim().min(1).max(50).optional(),
   specialInstructions: z.string().trim().max(500).optional(),
+  customerName: z.string().trim().min(1).max(80).optional(),
 }).strict();
 
 function publicOrder(order: any) {
@@ -68,17 +94,9 @@ function publicOrder(order: any) {
   };
 }
 
-async function authenticatedCustomerId(): Promise<string | null> {
-  // Connect first so a cold-start database outage is not mistaken for an invalid session.
-  await connectToMongo();
-  if (!(await isCustomerAuthed())) return null;
-  return getCustomerId();
-}
-
 export async function GET(req: NextRequest) {
   try {
-    const userId = await authenticatedCustomerId();
-    if (!userId) return NextResponse.json({ ok: false, error: 'UNAUTHENTICATED' }, { status: 401 });
+    const principal = await resolveOrderPrincipal(req);
 
     const url = new URL(req.url);
     const pageValue = Number(url.searchParams.get('page') ?? 1);
@@ -90,7 +108,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'INVALID_STATUS' }, { status: 400 });
     }
 
-    const filter: Record<string, unknown> = { userId };
+    if (!principal) {
+      return NextResponse.json({
+        ok: true,
+        orders: [],
+        total: 0,
+        page,
+        pages: 0,
+        identity: 'guest',
+        historyScope: 'this_browser',
+      }, { headers: { 'Cache-Control': 'private, no-store' } });
+    }
+
+    const filter: Record<string, unknown> = orderOwnershipFilter(principal);
     if (status !== 'all') filter.orderStatus = status;
     const [total, orders] = await Promise.all([
       Order.countDocuments(filter),
@@ -108,67 +138,96 @@ export async function GET(req: NextRequest) {
       total,
       page,
       pages: Math.ceil(total / limit),
+      identity: principal.identityType,
+      historyScope: principal.kind === 'guest' ? 'this_browser' : 'account',
     }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
-    console.error('[GET /api/user/orders]', error instanceof Error ? error.message : 'Unknown error');
+    if (error instanceof OrderPrincipalError) {
+      return NextResponse.json({ ok: false, error: error.code }, { status: error.status });
+    }
+    logServerError({ route: 'GET /api/user/orders', err: error, requestId: req.headers.get('x-request-id') });
     return NextResponse.json({ ok: false, error: 'DATABASE_UNAVAILABLE' }, { status: 503 });
   }
 }
 
 export async function POST(req: NextRequest) {
+  let principal: OrderPrincipal | null = null;
   try {
-    const userId = await authenticatedCustomerId();
-    if (!userId) return NextResponse.json({ ok: false, error: 'UNAUTHENTICATED' }, { status: 401 });
-
-    let limited;
-    try {
-      limited = await distributedRateLimit(`checkout:${userId}`, 5, 60);
-    } catch {
-      return NextResponse.json({ ok: false, error: 'RATE_LIMIT_UNAVAILABLE' }, { status: 503 });
-    }
-    if (!limited.allowed) {
-      return NextResponse.json(
-        { ok: false, error: 'TOO_MANY_REQUESTS', retryAfter: limited.retryAfter },
-        { status: 429, headers: { 'Retry-After': String(limited.retryAfter ?? 60) } },
-      );
-    }
-
     const idempotencyKey = req.headers.get('idempotency-key')?.trim() ?? '';
     const payload = await req.json().catch(() => null);
     const parsed = createOrderSchema.safeParse(payload);
     if (!parsed.success) {
-      return NextResponse.json(
+      return createOrderResponse(
         { ok: false, error: 'VALIDATION_FAILED', details: parsed.error.flatten() },
-        { status: 400 },
+        400,
       );
     }
 
-    const result = await createCustomerOrder({ userId, input: parsed.data, idempotencyKey });
-    return NextResponse.json(
+    principal = await resolveOrderPrincipal(req, { createGuest: true });
+    if (!principal) return createOrderResponse({ ok: false, error: 'UNAUTHENTICATED' }, 401);
+
+    let limited;
+    try {
+      const subject = principal.kind === 'account' ? `account:${principal.accountId}` : `guest:${principal.guestSessionId}`;
+      limited = await distributedRateLimit(`checkout:${subject}`, 5, 60);
+    } catch {
+      return createOrderResponse({ ok: false, error: 'RATE_LIMIT_UNAVAILABLE' }, 503, undefined, principal);
+    }
+    if (!limited.allowed) {
+      return createOrderResponse(
+        { ok: false, error: 'TOO_MANY_REQUESTS', retryAfter: limited.retryAfter },
+        429,
+        { 'Retry-After': String(limited.retryAfter ?? 60) },
+        principal,
+      );
+    }
+
+    const recoveryGuest = principal.kind === 'account' ? await getGuestSessionFromRequest(req) : null;
+    const result = await createCustomerOrder({
+      userId: principal.kind === 'account' ? principal.accountId : undefined,
+      guestSessionId: principal.kind === 'guest' ? principal.guestSessionId : undefined,
+      recoveryGuestSessionId: recoveryGuest?.id,
+      identityType: principal.identityType,
+      customerName: parsed.data.customerName,
+      input: parsed.data,
+      idempotencyKey,
+    });
+    return createOrderResponse(
       { ok: true, ...result },
-      { status: result.duplicate ? 200 : 201, headers: { 'Cache-Control': 'private, no-store' } },
+      result.duplicate ? 200 : 201,
+      undefined,
+      principal,
     );
   } catch (error) {
+    if (error instanceof OrderPrincipalError) {
+      return createOrderResponse({ ok: false, error: error.code }, error.status, undefined, principal);
+    }
     if (error instanceof OrderServiceError) {
-      return NextResponse.json(
-        { ok: false, error: error.code, details: error.details },
-        { status: error.status },
+      return createOrderResponse(
+        { ok: false, error: error.code, message: publicApiErrorMessage(error.code, error.details), details: error.details },
+        error.status,
+        undefined,
+        principal,
       );
     }
     if (error instanceof BusinessRulesConfigurationError) {
-      return NextResponse.json(
+      return createOrderResponse(
         { ok: false, error: 'CHECKOUT_NOT_CONFIGURED', details: { missing: error.missing } },
-        { status: 503 },
+        503,
+        undefined,
+        principal,
       );
     }
     const message = error instanceof Error ? error.message : '';
     if (/Transaction numbers are only allowed|replica set|Transaction support/i.test(message)) {
-      return NextResponse.json(
+      return createOrderResponse(
         { ok: false, error: 'TRANSACTION_DATABASE_REQUIRED' },
-        { status: 503 },
+        503,
+        undefined,
+        principal,
       );
     }
-    console.error('[POST /api/user/orders]', message || 'Unknown error');
-    return NextResponse.json({ ok: false, error: 'ORDER_CREATION_FAILED' }, { status: 500 });
+    logServerError({ route: 'POST /api/user/orders', err: error, requestId: req.headers.get('x-request-id') });
+    return createOrderResponse({ ok: false, error: 'ORDER_CREATION_FAILED' }, 500, undefined, principal);
   }
 }

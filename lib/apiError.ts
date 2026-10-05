@@ -52,9 +52,34 @@ export function jsonError(params: {
   err?: unknown;
   requestId?: string | null;
   extraClient?: Record<string, unknown>;
+  message?: string;
 }) {
   if (params.err !== undefined) {
     logServerError({ route: params.route, err: params.err, requestId: params.requestId });
   }
-  return NextResponse.json({ ok: false, error: params.clientErrorCode, ...(params.extraClient ?? {}) }, { status: params.status });
+  return NextResponse.json({
+    ok: false,
+    error: params.clientErrorCode,
+    ...(params.message ? { message: params.message } : {}),
+    ...(params.extraClient ?? {}),
+  }, { status: params.status });
+}
+
+export function publicApiErrorMessage(code: string, details?: Record<string, unknown>): string {
+  if (code === 'INSUFFICIENT_STOCK') {
+    const available = details?.available;
+    return typeof available === 'number' && Number.isSafeInteger(available)
+      ? available > 0 ? `Only ${available} available.` : 'This item is out of stock.'
+      : 'Current stock cannot support this quantity.';
+  }
+  const messages: Record<string, string> = {
+    INVENTORY_NOT_CONFIGURED: 'This item cannot be ordered until its inventory is configured.',
+    MENU_ITEM_UNAVAILABLE: 'This menu item is currently unavailable.',
+    VARIANT_UNAVAILABLE: 'This option is currently unavailable.',
+    INVALID_ORDER_TRANSITION: 'That order status change is not allowed.',
+    STALE_ORDER_VERSION: 'This order changed elsewhere. Refresh and try again.',
+    UNAUTHENTICATED: 'Authentication is required.',
+    FORBIDDEN: 'You do not have permission to perform this action.',
+  };
+  return messages[code] ?? 'The request could not be completed.';
 }

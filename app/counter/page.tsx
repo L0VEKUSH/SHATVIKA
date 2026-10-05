@@ -118,7 +118,10 @@ export default function CounterPage() {
     let reason: string | undefined;
     if (nextStatus === 'cancelled') {
       reason = window.prompt('Cancellation reason (required):')?.trim() || undefined;
-      if (!reason || reason.length < 3) return;
+      if (!reason || reason.length < 3 || reason.length > 300) {
+        window.alert('Enter a cancellation reason between 3 and 300 characters.');
+        return;
+      }
     }
     setBusyId(order.id);
     setOrderErrors(current => ({ ...current, [order.id]: '' }));
@@ -168,14 +171,14 @@ export default function CounterPage() {
   }
 
   async function logout() {
-    try { await apiRequest('/counter/logout', { method: 'POST' }); } finally {
+    try { await apiRequest('/counter/api/logout', { method: 'POST' }); } finally {
       clearApiClientSession();
       window.location.assign('/counter/login');
     }
   }
 
   return (
-    <main className="min-h-screen bg-[#090909] text-white">
+    <main id="main-content" className="min-h-screen bg-[#090909] text-white">
       <header className="sticky top-0 z-20 border-b border-white/10 bg-[#090909]/95 px-4 py-4 backdrop-blur sm:px-6">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3">
           <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-orange-400">Shatvika Corner</p><h1 className="text-2xl font-black">Live token queue</h1></div>
@@ -187,7 +190,7 @@ export default function CounterPage() {
         <div className="grid gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:grid-cols-4">
           <div><label htmlFor="queue-date" className="mb-1 block text-xs font-bold text-gray-400">Business date</label><input id="queue-date" type="date" value={businessDate} onChange={event => setBusinessDate(event.target.value)} className="w-full rounded-lg border border-white/15 bg-[#171717] px-3 py-2" /></div>
           <div><label htmlFor="queue-status" className="mb-1 block text-xs font-bold text-gray-400">Status</label><select id="queue-status" value={status} onChange={event => setStatus(event.target.value)} className="w-full rounded-lg border border-white/15 bg-[#171717] px-3 py-2"><option value="active">Active queue</option><option value="all">All</option>{Object.entries(statusLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>
-          <div><label htmlFor="queue-search" className="mb-1 block text-xs font-bold text-gray-400">Token or order ID</label><input id="queue-search" value={search} onChange={event => setSearch(event.target.value)} placeholder="SC-0042" className="w-full rounded-lg border border-white/15 bg-[#171717] px-3 py-2" /></div>
+          <div><label htmlFor="queue-search" className="mb-1 block text-xs font-bold text-gray-400">Token or order ID</label><input id="queue-search" value={search} onChange={event => setSearch(event.target.value)} placeholder="042" className="w-full rounded-lg border border-white/15 bg-[#171717] px-3 py-2" /></div>
           <div className="flex items-end"><button onClick={() => void loadQueue(true)} disabled={refreshing} className="w-full rounded-lg bg-orange-600 px-3 py-2 font-bold disabled:opacity-60">{refreshing ? 'Refreshing…' : 'Refresh now'}</button></div>
         </div>
 

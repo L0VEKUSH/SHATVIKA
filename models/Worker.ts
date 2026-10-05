@@ -1,4 +1,5 @@
 import mongoose, { Schema, type Model } from 'mongoose';
+import { canonicalLocationId } from '@/lib/locations';
 
 export type WorkerDoc = {
   _id: mongoose.Types.ObjectId;
@@ -20,7 +21,7 @@ const workerSchema = new Schema<WorkerDoc>({
   password: { type: String, required: true, select: false },
   passwordVersion: { type: Number, default: 0, select: false },
   role: { type: String, enum: ['worker'], default: 'worker', immutable: true },
-  locationId: { type: String, required: true, trim: true, maxlength: 64, index: true },
+  locationId: { type: String, required: true, trim: true, maxlength: 64, index: true, set: canonicalLocationId },
   permissions: { type: [String], default: ['counter:operate'] },
   isActive: { type: Boolean, default: true, index: true },
 }, { timestamps: true });

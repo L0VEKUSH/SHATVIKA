@@ -9,7 +9,7 @@ export default function About() {
   const badgeStats = stats.slice(0, 3);
   const displayAchievements = features
     .slice(0, 4)
-    .map(f => ({ icon: Award, label: f.title, sub: f.description.slice(0, 40) }));
+    .map(f => ({ id: f.id, icon: Award, label: f.title, sub: f.description.slice(0, 40) }));
 
   if (isLoading) {
     return (
@@ -60,8 +60,8 @@ export default function About() {
                 Current items, prices, and availability are read from the same catalogue used at checkout.
               </p>
               <p>
-                Browse the live menu for current product details. Delivery availability, charges, and taxes are
-                confirmed from the configured business rules before an order is accepted.
+                Browse the live menu for current product details. Stock, discounts, and configured tax are
+                confirmed by the server before a counter-collection order is accepted.
               </p>
             </div>
 
@@ -147,7 +147,7 @@ export default function About() {
         >
 {features.length >= 4 ? displayAchievements.map((a, i) => (
           <motion.div
-              key={`${a.label}-${i}`}
+            key={a.id}
               initial={{ opacity: 0, y: 24 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}

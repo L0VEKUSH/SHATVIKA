@@ -28,6 +28,8 @@ export interface Customer {
   joinedDate: string;
   createdAt?: string;
   updatedAt?: string;
+  authProvider?: 'password' | 'google';
+  googleLinked?: boolean;
 }
 
 interface AuthContextType {

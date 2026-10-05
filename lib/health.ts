@@ -1,5 +1,8 @@
 import { getBusinessRules } from '@/lib/businessRules';
+import { getFulfillmentCapabilities } from '@/lib/businessRules';
+import { getCounterLocationConfiguration } from '@/lib/locations';
 import { getPasswordResetDeliveryConfig } from '@/lib/passwordReset';
+import { workerSessionConfigurationIssue } from '@/lib/workerSessionConfig';
 
 type Environment = Record<string, string | undefined>;
 type IntegrationState = 'configured' | 'disabled' | 'misconfigured';
@@ -26,10 +29,12 @@ function hasSecureIndependentSecrets(environment: Environment): boolean {
   const secrets = [
     environment.ADMIN_JWT_SECRET?.trim(),
     environment.CUSTOMER_JWT_SECRET?.trim(),
+    environment.WORKER_JWT_SECRET?.trim(),
     environment.CSRF_SECRET?.trim(),
   ];
   const minimumBytes = environment.NODE_ENV === 'production' ? 32 : 1;
-  return secrets.every((secret): secret is string => Boolean(secret) && byteLength(secret!) >= minimumBytes)
+  return workerSessionConfigurationIssue(environment) === null
+    && secrets.every((secret): secret is string => Boolean(secret) && byteLength(secret!) >= minimumBytes)
     && new Set(secrets).size === secrets.length;
 }
 
@@ -64,7 +69,13 @@ export function assessRuntimeConfiguration(
   let checkoutRules = false;
   try {
     getBusinessRules(environment);
-    checkoutRules = true;
+    const capabilities = getFulfillmentCapabilities(environment);
+    const location = getCounterLocationConfiguration(environment);
+    checkoutRules = location.explicit
+      && environment.DELIVERY_ENABLED?.trim().toLowerCase() === 'false'
+      && capabilities.deliveryEnabled === false
+      && Boolean(capabilities.locationId)
+      && Boolean(capabilities.timeZone);
   } catch {
     checkoutRules = false;
   }

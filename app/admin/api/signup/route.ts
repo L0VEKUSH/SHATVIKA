@@ -5,6 +5,7 @@ import { setAdminSessionForAdmin } from '@/lib/adminAuth';
 import { adminSessionConfigurationError } from '@/lib/adminJwt';
 import { connectToMongo } from '@/lib/mongoose';
 import { authRateLimit } from '@/lib/authRateLimit';
+import { logServerError } from '@/lib/apiError';
 import { validateEmail, validatePassword } from '@/lib/validators';
 import { Admin } from '@/models/Admin';
 
@@ -99,7 +100,11 @@ export async function POST(request: Request) {
         { status: 403 },
       );
     }
-    console.error('[AdminBootstrap] Creation failed:', error instanceof Error ? error.message : 'unknown error');
+    logServerError({
+      route: 'POST /admin/api/signup',
+      err: error,
+      requestId: request.headers.get('x-request-id'),
+    });
     return NextResponse.json(
       { ok: false, error: 'BOOTSTRAP_FAILED', message: 'Admin bootstrap failed.' },
       { status: 500 },

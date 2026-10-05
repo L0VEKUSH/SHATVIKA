@@ -56,7 +56,10 @@ function OrderRow({ order }: { order: Order }) {
     let reason: string | undefined;
     if (status === 'cancelled') {
       const supplied = window.prompt('Record the cancellation reason (required):')?.trim();
-      if (!supplied) return;
+      if (!supplied || supplied.length < 3 || supplied.length > 300) {
+        window.alert('Enter a cancellation reason between 3 and 300 characters.');
+        return;
+      }
       reason = supplied;
     }
     setUpdating(true);

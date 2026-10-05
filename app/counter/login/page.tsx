@@ -25,8 +25,14 @@ export default function CounterLoginPage() {
       router.replace(returnTo);
       router.refresh();
     } catch (requestError) {
-      setError(requestError instanceof ApiClientError && requestError.code === 'RATE_LIMITED'
-        ? 'Too many attempts. Wait a minute and try again.'
+      const messages: Record<string, string> = {
+        RATE_LIMITED: 'Too many attempts. Wait a minute and try again.',
+        RATE_LIMIT_UNAVAILABLE: 'Sign-in protection is temporarily unavailable. Try again shortly.',
+        AUTH_UNAVAILABLE: 'Worker sign-in is not configured on this server. Ask an administrator to check the worker session secret.',
+        WORKER_LOCATION_MISMATCH: 'Your account is assigned to a different counter. Ask an administrator to update the worker location.',
+      };
+      setError(requestError instanceof ApiClientError
+        ? messages[requestError.code] ?? 'Sign-in failed. Check your worker email and password.'
         : 'Sign-in failed. Check your worker email and password.');
     } finally {
       setSubmitting(false);
@@ -34,7 +40,7 @@ export default function CounterLoginPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#0a0a0a] text-white grid place-items-center p-5">
+    <main id="main-content" className="min-h-screen bg-[#0a0a0a] text-white grid place-items-center p-5">
       <section className="w-full max-w-md rounded-3xl border border-orange-500/20 bg-[#151515] p-6 sm:p-8 shadow-2xl">
         <p className="text-xs font-bold uppercase tracking-[0.22em] text-orange-400">Shatvika Corner</p>
         <h1 className="mt-2 text-3xl font-black">Counter workspace</h1>

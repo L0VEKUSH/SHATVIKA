@@ -179,7 +179,7 @@ export default function Hero({ onOrderNow }: HeroProps) {
           transition={{ delay: 0.65, duration: 0.6 }}
         >
           See the current catalogue, prices, and availability.{' '}
-          <span className="text-white font-medium">Final charges and serviceability are validated at checkout.</span>
+          <span className="text-white font-medium">Confirm once for a counter token, then pay and collect at SHATVIKA CORNER.</span>
         </motion.p>
 
         {/* CTA Buttons */}

@@ -1,6 +1,7 @@
 import mongoose, { type ClientSession } from 'mongoose';
 import { connectToMongo } from '@/lib/mongoose';
 import { calculateOrderTotals, getBusinessRules, getFulfillmentCapabilities } from '@/lib/businessRules';
+import { availableQuantity, resolveInventoryMode, type InventoryMode } from '@/lib/inventory';
 import { legacyRupeesOrPaise, paiseToRupees, percentageOfPaise } from '@/lib/money';
 import { requestFingerprint } from '@/lib/orders/fingerprint';
 import { allocateOrderToken } from '@/lib/orders/token';
@@ -30,6 +31,8 @@ export type CheckoutInput = {
   couponCode?: string;
   specialInstructions?: string;
 };
+
+export type CheckoutIdentityType = 'guest' | 'google' | 'registered';
 
 export type OrderActor = {
   type: OrderActorType;
@@ -120,13 +123,15 @@ function serializeOrderResult(order: any, duplicate: boolean) {
 async function reserveCoupon({
   code,
   userId,
+  guestSessionId,
   subtotalPaise,
   orderItems,
   session,
   now,
 }: {
   code: string;
-  userId: mongoose.Types.ObjectId;
+  userId: mongoose.Types.ObjectId | null;
+  guestSessionId: mongoose.Types.ObjectId | null;
   subtotalPaise: number;
   orderItems: any[];
   session: ClientSession;
@@ -182,16 +187,19 @@ async function reserveCoupon({
         : { usageCount: { $lt: coupon.usageLimit } },
     ],
   };
+  const couponIncrement: Record<string, unknown> = { $inc: { usageCount: 1 } };
+  if (userId) couponIncrement.$addToSet = { usedBy: userId };
   const reserved = await Coupon.findOneAndUpdate(
     globalFilter,
-    { $inc: { usageCount: 1 }, $addToSet: { usedBy: userId } },
+    couponIncrement,
     { returnDocument: 'after', session },
   ).lean();
   if (!reserved) throw new OrderServiceError('COUPON_LIMIT_REACHED', 409);
 
   const perCustomerLimit = Number(coupon.perCustomerLimit ?? 1);
+  const usageOwner = userId ? { userId } : { guestSessionId };
   const usage = await CouponUsage.findOneAndUpdate(
-    { couponId: coupon._id, userId },
+    { couponId: coupon._id, ...usageOwner },
     { $setOnInsert: { count: 0 } },
     { upsert: true, returnDocument: 'after', session },
   );
@@ -210,16 +218,26 @@ async function reserveCoupon({
 
 export async function createCustomerOrder({
   userId,
+  guestSessionId,
+  recoveryGuestSessionId,
+  identityType,
+  customerName,
   input,
   idempotencyKey,
   now = new Date(),
 }: {
-  userId: string;
+  userId?: string;
+  guestSessionId?: string;
+  recoveryGuestSessionId?: string;
+  identityType?: CheckoutIdentityType;
+  customerName?: string | null;
   input: CheckoutInput;
   idempotencyKey: string;
   now?: Date;
 }) {
-  if (!mongoose.isValidObjectId(userId)) throw new OrderServiceError('UNAUTHENTICATED', 401);
+  const hasAccountOwner = Boolean(userId && mongoose.isValidObjectId(userId));
+  const hasGuestOwner = Boolean(guestSessionId && mongoose.isValidObjectId(guestSessionId));
+  if (hasAccountOwner === hasGuestOwner) throw new OrderServiceError('UNAUTHENTICATED', 401);
   if (!idempotencyKey || idempotencyKey.length < 8 || idempotencyKey.length > 128) {
     throw new OrderServiceError('IDEMPOTENCY_KEY_REQUIRED', 400);
   }
@@ -237,9 +255,17 @@ export async function createCustomerOrder({
     fulfillmentType: 'counter', paymentMethod: 'counter',
     couponCode: input.couponCode?.trim().toUpperCase() || null,
     specialInstructions: input.specialInstructions?.trim() || null,
+    customerName: customerName?.trim() || null,
     items: lines,
   });
-  const userObjectId = new mongoose.Types.ObjectId(userId);
+  const userObjectId = hasAccountOwner ? new mongoose.Types.ObjectId(userId) : null;
+  const guestObjectId = hasGuestOwner ? new mongoose.Types.ObjectId(guestSessionId) : null;
+  const recoveryGuestObjectId = userObjectId && recoveryGuestSessionId && mongoose.isValidObjectId(recoveryGuestSessionId)
+    ? new mongoose.Types.ObjectId(recoveryGuestSessionId)
+    : null;
+  const ownerFilter = userObjectId ? { userId: userObjectId } : { guestSessionId: guestObjectId };
+  const ownerActorId = userObjectId ? String(userObjectId) : String(guestObjectId);
+  const ownerActorType: OrderActorType = userObjectId ? 'customer' : 'guest';
 
   await connectToMongo();
   const session = await mongoose.startSession();
@@ -247,7 +273,7 @@ export async function createCustomerOrder({
 
   try {
     await session.withTransaction(async () => {
-      const existing = await Order.findOne({ userId: userObjectId, idempotencyKey }).session(session).lean();
+      const existing = await Order.findOne({ ...ownerFilter, idempotencyKey }).session(session).lean();
       if (existing) {
         if (existing.requestFingerprint !== fingerprint) {
           throw new OrderServiceError('IDEMPOTENCY_KEY_REUSED', 409);
@@ -255,12 +281,45 @@ export async function createCustomerOrder({
         result = serializeOrderResult(existing, true);
         return;
       }
+      if (recoveryGuestObjectId) {
+        const guestRetry = await Order.findOne({ guestSessionId: recoveryGuestObjectId, idempotencyKey }).session(session);
+        if (guestRetry) {
+          if (guestRetry.requestFingerprint !== fingerprint) throw new OrderServiceError('IDEMPOTENCY_KEY_REUSED', 409);
+          if (guestRetry.claimedByUserId && String(guestRetry.claimedByUserId) !== String(userObjectId)) {
+            throw new OrderServiceError('IDEMPOTENCY_KEY_REUSED', 409);
+          }
+          guestRetry.claimedByUserId = userObjectId;
+          guestRetry.claimedAt ??= now;
+          guestRetry.customerIdentityType = identityType ?? 'registered';
+          await guestRetry.save({ session });
+          result = serializeOrderResult(guestRetry, true);
+          return;
+        }
+      }
 
-      const user = await User.findById(userObjectId)
-        .select('_id fullName email phone isActive')
-        .session(session)
-        .lean();
-      if (!user || user.isActive === false) throw new OrderServiceError('USER_NOT_FOUND', 404);
+      const user = userObjectId
+        ? await User.findById(userObjectId)
+          .select('_id fullName email phone isActive authProvider')
+          .session(session)
+          .lean()
+        : null;
+      if (userObjectId && (!user || user.isActive === false)) throw new OrderServiceError('USER_NOT_FOUND', 404);
+
+      if (guestObjectId) {
+        const configuredLimit = Number(process.env.MAX_OUTSTANDING_GUEST_ORDERS ?? 5);
+        const outstandingLimit = Number.isSafeInteger(configuredLimit) && configuredLimit >= 1 && configuredLimit <= 20
+          ? configuredLimit
+          : 5;
+        const outstanding = await Order.countDocuments({
+          guestSessionId: guestObjectId,
+          claimedByUserId: null,
+          orderStatus: { $nin: ['served', 'delivered', 'cancelled'] },
+          paymentStatus: { $in: ['pending', 'failed'] },
+        }).session(session);
+        if (outstanding >= outstandingLimit) {
+          throw new OrderServiceError('GUEST_OUTSTANDING_ORDER_LIMIT', 429, { maximum: outstandingLimit });
+        }
+      }
 
       const productIds = [...new Set(lines.map((line) => line.menuItemId))];
       if (productIds.some((id) => !mongoose.isValidObjectId(id))) {
@@ -271,10 +330,19 @@ export async function createCustomerOrder({
       const orderId = new mongoose.Types.ObjectId();
 
       const orderItems: any[] = [];
+      const inventoryModeByProduct = new Map<string, InventoryMode>();
       let subtotalPaise = 0;
       for (const line of lines) {
         const product: any = productMap.get(line.menuItemId);
         if (!product || product.available === false) throw new OrderServiceError('MENU_ITEM_UNAVAILABLE', 409);
+        const inventoryMode = resolveInventoryMode(product);
+        if (inventoryMode === 'unconfigured') {
+          throw new OrderServiceError('INVENTORY_NOT_CONFIGURED', 409, {
+            menuItemId: line.menuItemId,
+            available: null,
+          });
+        }
+        inventoryModeByProduct.set(line.menuItemId, inventoryMode);
 
         const variants: any[] = product.variants ?? [];
         const isBase = variants.length === 0 && (line.variantId === 'base' || !line.variantId);
@@ -301,6 +369,7 @@ export async function createCustomerOrder({
           categoryId: product.categoryId || 'unknown',
           categoryName: product.category || 'Unknown',
           quantity: line.quantity,
+          inventoryMode,
           unitPricePaise,
           totalPricePaise,
           unitCostPaise,
@@ -315,17 +384,40 @@ export async function createCustomerOrder({
         quantityByProduct.set(line.menuItemId, (quantityByProduct.get(line.menuItemId) ?? 0) + line.quantity);
       }
       for (const [menuItemId, quantity] of quantityByProduct) {
-        const stock = await MenuItem.updateOne(
-          { _id: menuItemId, available: true, quantity: { $gte: quantity } },
-          { $inc: { quantity: -quantity, quantitySold: quantity } },
-          { session },
-        );
+        const inventoryMode = inventoryModeByProduct.get(menuItemId);
+        const stock = inventoryMode === 'unlimited'
+          ? await MenuItem.updateOne(
+              { _id: menuItemId, available: true, inventoryMode: 'unlimited' },
+              { $inc: { quantitySold: quantity } },
+              { session },
+            )
+          : await MenuItem.updateOne(
+              {
+                _id: menuItemId,
+                available: true,
+                quantity: { $gte: quantity },
+                $or: [{ inventoryMode: 'tracked' }, { inventoryMode: { $exists: false } }],
+              },
+              { $inc: { quantity: -quantity, quantitySold: quantity } },
+              { session },
+            );
         if (stock.modifiedCount !== 1) {
-          throw new OrderServiceError('INSUFFICIENT_STOCK', 409, { menuItemId });
+          const current = await MenuItem.findById(menuItemId)
+            .select('available inventoryMode quantity')
+            .session(session)
+            .lean();
+          const available = availableQuantity(current ?? {});
+          throw new OrderServiceError(
+            current && resolveInventoryMode(current) === 'unconfigured'
+              ? 'INVENTORY_NOT_CONFIGURED'
+              : 'INSUFFICIENT_STOCK',
+            409,
+            { menuItemId, available, requested: quantity },
+          );
         }
       }
       await InventoryEvent.insertMany(
-        lines.map(line => ({
+        lines.filter(line => inventoryModeByProduct.get(line.menuItemId) === 'tracked').map(line => ({
           orderId,
           menuItemId: line.menuItemId,
           variantId: line.variantId ?? 'base',
@@ -333,8 +425,8 @@ export async function createCustomerOrder({
           quantity: line.quantity,
           quantityDelta: -line.quantity,
           reason: 'Counter order confirmed',
-          actorType: 'customer',
-          actorId: userId,
+          actorType: ownerActorType,
+          actorId: ownerActorId,
           occurredAt: now,
         })),
         { session },
@@ -346,6 +438,7 @@ export async function createCustomerOrder({
         couponData = await reserveCoupon({
           code: input.couponCode.trim(),
           userId: userObjectId,
+          guestSessionId: guestObjectId,
           subtotalPaise,
           orderItems,
           session,
@@ -366,6 +459,8 @@ export async function createCustomerOrder({
       const [created] = await Order.create([{
         _id: orderId,
         userId: userObjectId,
+        guestSessionId: guestObjectId,
+        customerIdentityType: identityType ?? (userObjectId ? (user?.authProvider === 'google' ? 'google' : 'registered') : 'guest'),
         fulfillmentType: 'counter',
         fulfillmentLocationId: token.locationId,
         fulfillmentLocationName: token.locationName,
@@ -373,9 +468,9 @@ export async function createCustomerOrder({
         tokenSequence: token.sequence,
         tokenNumber: token.tokenNumber,
         customerSnapshot: {
-          name: user.fullName,
-          email: user.email,
-          phone: user.phone ?? null,
+          name: user?.fullName ?? customerName?.trim() ?? null,
+          email: user?.email ?? null,
+          phone: user?.phone ?? null,
         },
         items: orderItems,
         subtotalPaise,
@@ -412,8 +507,8 @@ export async function createCustomerOrder({
           fromStatus: null,
           status: 'placed',
           timestamp: now,
-          actorType: 'customer',
-          actorId: userId,
+          actorType: ownerActorType,
+          actorId: ownerActorId,
           note: 'Counter order placed',
         }],
         deliveryAddress: null,
@@ -425,7 +520,7 @@ export async function createCustomerOrder({
     });
   } catch (error) {
     if (isDuplicateKey(error)) {
-      const existing = await Order.findOne({ userId: userObjectId, idempotencyKey }).lean();
+      const existing = await Order.findOne({ ...ownerFilter, idempotencyKey }).lean();
       if (existing && existing.requestFingerprint === fingerprint) return serializeOrderResult(existing, true);
       throw new OrderServiceError('IDEMPOTENCY_KEY_REUSED', 409);
     }
@@ -446,24 +541,33 @@ async function compensateCancelledOrder(
   now: Date,
 ): Promise<void> {
   if (order.inventoryState === 'committed') {
-    const quantityByProduct = new Map<string, number>();
+    const quantityByProduct = new Map<string, { quantity: number; inventoryMode: InventoryMode }>();
     for (const item of order.items ?? []) {
       const id = String(item.menuItemId);
-      quantityByProduct.set(id, (quantityByProduct.get(id) ?? 0) + Number(item.quantity));
+      // Historical orders predate the explicit snapshot and always decremented tracked stock.
+      const inventoryMode: InventoryMode = item.inventoryMode === 'unlimited' ? 'unlimited' : 'tracked';
+      const existing = quantityByProduct.get(id);
+      quantityByProduct.set(id, {
+        quantity: (existing?.quantity ?? 0) + Number(item.quantity),
+        inventoryMode,
+      });
     }
     const isCounter = order.fulfillmentType === 'counter';
     const canRestock = !isCounter || ['placed', 'pending', 'accepted'].includes(order.orderStatus);
-    for (const [menuItemId, quantity] of quantityByProduct) {
+    for (const [menuItemId, inventory] of quantityByProduct) {
+      const { quantity, inventoryMode } = inventory;
       await MenuItem.updateOne(
-        { _id: menuItemId },
-        { $inc: canRestock
-          ? { quantity, quantitySold: -quantity }
-          : { quantitySold: -quantity, quantityWasted: quantity } },
+        { _id: menuItemId, quantitySold: { $gte: quantity } },
+        { $inc: inventoryMode === 'unlimited'
+          ? (canRestock ? { quantitySold: -quantity } : { quantitySold: -quantity, quantityWasted: quantity })
+          : (canRestock
+              ? { quantity, quantitySold: -quantity }
+              : { quantitySold: -quantity, quantityWasted: quantity }) },
         { session },
       );
     }
     await InventoryEvent.insertMany(
-      (order.items ?? []).map((item: any) => ({
+      (order.items ?? []).filter((item: any) => item.inventoryMode !== 'unlimited').map((item: any) => ({
         menuItemId: item.menuItemId,
         variantId: item.variantId ?? 'base',
         orderId: order._id,
@@ -481,13 +585,16 @@ async function compensateCancelledOrder(
   }
 
   if (order.couponState === 'redeemed' && order.couponId) {
+    const usageOwner = order.userId
+      ? { userId: order.userId }
+      : { guestSessionId: order.guestSessionId };
     const usage = await CouponUsage.findOneAndUpdate(
-      { couponId: order.couponId, userId: order.userId, count: { $gt: 0 } },
+      { couponId: order.couponId, ...usageOwner, count: { $gt: 0 } },
       { $inc: { count: -1 } },
       { returnDocument: 'after', session },
     );
     const couponUpdate: Record<string, unknown> = { $inc: { usageCount: -1 } };
-    if (!usage || usage.count === 0) couponUpdate.$pull = { usedBy: order.userId };
+    if (order.userId && (!usage || usage.count === 0)) couponUpdate.$pull = { usedBy: order.userId };
     await Coupon.updateOne({ _id: order.couponId, usageCount: { $gt: 0 } }, couponUpdate, { session });
     order.couponState = 'released';
   }
@@ -529,7 +636,10 @@ export async function transitionOrder({
       )) {
         throw new OrderServiceError('ORDER_NOT_FOUND', 404);
       }
-      if (actor.type === 'customer' && String(order.userId) !== actor.id) {
+      if (actor.type === 'customer' && ![String(order.userId ?? ''), String(order.claimedByUserId ?? '')].includes(actor.id)) {
+        throw new OrderServiceError('ORDER_NOT_FOUND', 404);
+      }
+      if (actor.type === 'guest' && String(order.guestSessionId) !== actor.id) {
         throw new OrderServiceError('ORDER_NOT_FOUND', 404);
       }
       if (order.orderStatus === nextStatus) {
@@ -707,6 +817,7 @@ export async function recordCounterPayment({
       const [event] = await PaymentEvent.create([{
         orderId: order._id,
         userId: order.userId,
+        guestSessionId: order.guestSessionId,
         type: eventType,
         status: 'succeeded',
         method,

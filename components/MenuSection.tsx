@@ -6,6 +6,7 @@ import { Search, Heart, Plus, Star } from 'lucide-react';
 import { Category, MenuItem } from '@/types';
 import { useCart } from '@/context/CartContext';
 import { useAdmin } from '@/context/AdminContext';
+import { availableQuantity, resolveInventoryMode } from '@/lib/inventory';
 
 const CATEGORIES: Category[] = [
   'All', 'Momos', 'Fries', 'Burgers', 'Patties', 'Sandwiches', 'South Indian', 'Shakes', 'Drinks', 'Desserts', 'Pizza'
@@ -59,6 +60,17 @@ function FoodCard({ item }: { item: MenuItem }) {
 
   const selectedVariant = choices.find(v => v.id === selectedVariantId) || choices[0];
   const price = selectedVariant?.price || item.basePrice || 0;
+  const inventoryMode = resolveInventoryMode(item);
+  const stock = availableQuantity(item);
+  const canAdd = item.available !== false && selectedVariant?.available !== false &&
+    (inventoryMode === 'unlimited' || (inventoryMode === 'tracked' && (stock ?? 0) > 0));
+  const availabilityLabel = inventoryMode === 'unconfigured'
+    ? 'Inventory setup required'
+    : inventoryMode === 'tracked' && stock === 0
+      ? 'Out of stock'
+      : inventoryMode === 'tracked' && stock != null && stock <= 5
+        ? `Only ${stock} available`
+        : null;
 
   return (
     <motion.div
@@ -121,10 +133,11 @@ function FoodCard({ item }: { item: MenuItem }) {
               <button
                 key={variant.id ?? variant.name}
                 onClick={() => setSelectedVariantId(variant.id)}
+                disabled={variant.available === false}
                 className={`text-[10px] px-3 py-1.5 rounded-full border transition-all duration-200 transform-gpu hover:scale-[1.03] ${
                   selectedVariantId === variant.id
                     ? 'bg-[#FF4500] text-white border-transparent shadow-[0_0_0_3px_rgba(255,69,0,0.15)]'
-                    : 'bg-[#0f0f0f] text-gray-200 border-white/15 hover:border-white/30'
+                    : 'bg-[#0f0f0f] text-gray-200 border-white/15 hover:border-white/30 disabled:cursor-not-allowed disabled:opacity-40'
                 }`}
               >
                 {variant.name}
@@ -141,23 +154,25 @@ function FoodCard({ item }: { item: MenuItem }) {
 
           <button
             onClick={handleAdd}
+            disabled={!canAdd}
             className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold
                         transition-all duration-200 ${
                           added
                             ? 'bg-green-500/20 border border-green-500/40 text-green-400'
-                            : 'btn-flame'
+                            : 'btn-flame disabled:cursor-not-allowed disabled:opacity-50'
                         }`}
           >
             {added ? (
               <>✓ Added</>
             ) : (
               <>
-                <Plus className="w-3 h-3" />
-                Add
+                {canAdd && <Plus className="w-3 h-3" />}
+                {canAdd ? 'Add' : availabilityLabel ?? 'Unavailable'}
               </>
             )}
           </button>
         </div>
+        {availabilityLabel && <p className="text-[10px] font-semibold text-amber-300">{availabilityLabel}</p>}
       </div>
     </motion.div>
   );

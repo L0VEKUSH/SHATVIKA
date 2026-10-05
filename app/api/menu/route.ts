@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getAdminSessionState } from '@/lib/adminJwt';
+import { logServerError } from '@/lib/apiError';
 import { connectToMongo } from '@/lib/mongoose';
 import { distributedRateLimit, getClientIp } from '@/lib/rateLimit';
 import { MenuItem } from '@/models/MenuItem';
+import { INVENTORY_MODES } from '@/lib/inventory';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,6 +39,7 @@ const menuItemInputSchema = z.object({
   spicy: z.boolean().optional(),
   vegetarian: z.boolean().optional(),
   available: z.boolean().optional(),
+  inventoryMode: z.enum(INVENTORY_MODES).default('tracked'),
   isNew: z.boolean().optional(),
   isNewItem: z.boolean().optional(),
   quantity: z.number().int().nonnegative().max(1_000_000).optional(),
@@ -72,9 +75,10 @@ export async function GET(request: NextRequest) {
     const query = MenuItem.find(filter).sort({ createdAt: -1 });
     if (!admin) query.select('-costPaise -variants.costPaise');
     const items = await query.lean();
-    return NextResponse.json(items, { headers: { 'Cache-Control': admin ? 'private, no-store' : 'public, max-age=30' } });
+    const requireFreshInventory = request.nextUrl.searchParams.get('availability') === '1';
+    return NextResponse.json(items, { headers: { 'Cache-Control': admin || requireFreshInventory ? 'private, no-store' : 'public, max-age=30' } });
   } catch (error) {
-    console.error('[GET /api/menu]', error instanceof Error ? error.message : 'Unknown error');
+    logServerError({ route: 'GET /api/menu', err: error, requestId: request.headers.get('x-request-id') });
     return NextResponse.json({ ok: false, error: 'MENU_UNAVAILABLE' }, { status: 503 });
   }
 }
@@ -96,7 +100,7 @@ export async function POST(request: NextRequest) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 11000) {
       return NextResponse.json({ ok: false, error: 'MENU_NAME_EXISTS' }, { status: 409 });
     }
-    console.error('[POST /api/menu]', error instanceof Error ? error.message : 'Unknown error');
+    logServerError({ route: 'POST /api/menu', err: error, requestId: request.headers.get('x-request-id') });
     return NextResponse.json({ ok: false, error: 'MENU_CREATE_FAILED' }, { status: 500 });
   }
 }

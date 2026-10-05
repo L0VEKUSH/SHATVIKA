@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { calculateOrderTotals, getBusinessRules } from '@/lib/businessRules';
 import { legacyRupeesOrPaise, paiseToRupees, percentageOfPaise } from '@/lib/money';
+import { availableQuantity, resolveInventoryMode } from '@/lib/inventory';
 import { Coupon } from '@/models/Coupon';
 import { CouponUsage } from '@/models/CouponUsage';
 import { MenuItem } from '@/models/MenuItem';
@@ -30,7 +31,8 @@ function normalizeLines(lines: CartLine[], maximum: number) {
 }
 
 export async function quoteCustomerCart(input: {
-  userId: string;
+  userId?: string;
+  guestSessionId?: string;
   lines: CartLine[];
   couponCode?: string | null;
   now?: Date;
@@ -49,7 +51,7 @@ export async function quoteCustomerCart(input: {
   const products = await MenuItem.find({
     _id: { $in: [...new Set(lines.map(line => line.menuItemId))] },
     archivedAt: null,
-  }).select('name category categoryId variants basePrice basePricePaise available quantity').lean();
+  }).select('name category categoryId variants basePrice basePricePaise available inventoryMode quantity').lean();
   const productMap = new Map(products.map((product: any) => [String(product._id), product]));
   const stockByProduct = new Map<string, number>();
   const quotedItems: Array<Required<CartLine> & { categoryId: string; categoryName: string; lineTotalPaise: number }> = [];
@@ -76,9 +78,20 @@ export async function quoteCustomerCart(input: {
     });
   }
   for (const [productId, requested] of stockByProduct) {
-    const available = Number(productMap.get(productId)?.quantity ?? 0);
-    if (!Number.isSafeInteger(available) || available < requested) {
-      throw new CartQuoteError('INSUFFICIENT_STOCK', 409, { menuItemId: productId, available });
+    const product = productMap.get(productId);
+    const mode = resolveInventoryMode(product ?? {});
+    if (mode === 'unconfigured') {
+      throw new CartQuoteError('INVENTORY_NOT_CONFIGURED', 409, {
+        menuItemId: productId,
+        available: null,
+        requested,
+      });
+    }
+    if (mode === 'tracked') {
+      const available = availableQuantity(product) ?? 0;
+      if (available < requested) {
+        throw new CartQuoteError('INSUFFICIENT_STOCK', 409, { menuItemId: productId, available, requested });
+      }
     }
   }
 
@@ -95,7 +108,8 @@ export async function quoteCustomerCart(input: {
     if (coupon.usageLimit != null && coupon.usageCount >= coupon.usageLimit) {
       throw new CartQuoteError('COUPON_LIMIT_REACHED', 409);
     }
-    const usage = await CouponUsage.findOne({ couponId: coupon._id, userId: input.userId }).lean();
+    const usageOwner = input.userId ? { userId: input.userId } : { guestSessionId: input.guestSessionId };
+    const usage = await CouponUsage.findOne({ couponId: coupon._id, ...usageOwner }).lean();
     if ((usage?.count ?? 0) >= (coupon.perCustomerLimit ?? 1)) {
       throw new CartQuoteError('COUPON_CUSTOMER_LIMIT_REACHED', 409);
     }

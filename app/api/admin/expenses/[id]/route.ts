@@ -5,8 +5,9 @@ import { hasAdminPermission } from '@/lib/adminPermissions';
 import { getAdminSessionState } from '@/lib/adminJwt';
 import { connectToMongo } from '@/lib/mongoose';
 import { Expense } from '@/models/Expense';
+import { operationalReasonSchema, validationErrorResponse } from '@/lib/validation';
 
-const voidSchema = z.object({ reason: z.string().trim().min(3).max(300), expectedVersion: z.number().int().nonnegative() }).strict();
+const voidSchema = z.object({ reason: operationalReasonSchema, expectedVersion: z.number().int().nonnegative() }).strict();
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const admin = await getAdminSessionState();
@@ -15,7 +16,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const { id } = await params;
   if (!mongoose.isValidObjectId(id)) return NextResponse.json({ ok: false, error: 'INVALID_EXPENSE_ID' }, { status: 400 });
   const parsed = voidSchema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ ok: false, error: 'VALIDATION_FAILED', details: parsed.error.flatten() }, { status: 400 });
+  if (!parsed.success) return validationErrorResponse(parsed.error, 'Provide a void reason between 3 and 300 characters.');
   await connectToMongo();
   const expense = await Expense.findOneAndUpdate(
     { _id: id, status: 'active', stateVersion: parsed.data.expectedVersion },

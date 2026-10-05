@@ -117,9 +117,19 @@ describe('business report dataset reconciliation', () => {
       netSalesPaise: snapshot.tables.soldItems.reduce((sum, row) => sum + row.netSalesPaise, 0),
       refundAdjustmentPaise: snapshot.tables.soldItems.reduce((sum, row) => sum + row.refundAdjustmentPaise, 0),
     });
+    expect(soldItems.totals?.refundAdjustmentPaise).toBe(10_000);
+    expect(snapshot.overview.netMerchandiseSales.value).toBe(
+      snapshot.tables.soldItems.reduce((sum, row) => sum + Math.max(0, row.netSalesPaise - row.refundAdjustmentPaise), 0),
+    );
     expect(consolidated.sections.map(current => current.key)).toEqual(expect.arrayContaining([
       'overview', 'orders', 'sold-items', 'products', 'categories', 'expenses', 'payments-refunds', 'inventory', 'inventory-events', 'operations', 'customers',
     ]));
+    const overview = section(consolidated, 'overview');
+    expect(overview.rows.find(row => row.definition === 'gross_margin')?.value).toBe(
+      snapshot.overview.grossMargin.value ?? 'Not available',
+    );
+    expect(snapshot.tables.soldItems.every(row => row.orderStatus === 'delivered' || row.orderStatus === 'served')).toBe(true);
+    expect(snapshot.tables.soldItems.some(row => row.totalCostPaise === null && row.grossProfitPaise === null)).toBe(true);
   });
 
   it('keeps the dashboard cutoff distinct from the report generation timestamp', () => {

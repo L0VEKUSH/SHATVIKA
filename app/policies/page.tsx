@@ -3,11 +3,16 @@ import Link from 'next/link';
 
 export const metadata: Metadata = {
   title: 'Business policies',
-  description: 'Current SHATVIKA CORNER delivery, cancellation, refund, privacy, and tax information.',
+  description: 'Current SHATVIKA CORNER collection, cancellation, refund, privacy, and tax information.',
 };
 
 const policies = [
-  { id: 'delivery', title: 'Delivery and service area', value: process.env.BUSINESS_DELIVERY_POLICY, missing: 'The owner must confirm service areas, charges, hours, and delivery expectations before publishing this policy.' },
+  {
+    id: 'delivery',
+    title: 'Collection and delivery status',
+    value: `Delivery is currently unavailable. New orders are for counter collection at SHATVIKA CORNER and have no delivery fee.${process.env.BUSINESS_DELIVERY_POLICY?.trim() ? `\n\n${process.env.BUSINESS_DELIVERY_POLICY.trim()}` : ''}`,
+    missing: '',
+  },
   { id: 'cancellation', title: 'Cancellation and refunds', value: process.env.BUSINESS_CANCELLATION_REFUND_POLICY, missing: 'The owner must confirm cancellation cut-offs, refund eligibility, method, and timing before publishing this policy.' },
   { id: 'privacy', title: 'Privacy notice', value: process.env.BUSINESS_PRIVACY_NOTICE, missing: 'The owner or legal adviser must supply the privacy notice, data-contact details, retention terms, and applicable rights.' },
   { id: 'tax', title: 'Tax information', value: process.env.BUSINESS_TAX_INFORMATION, missing: 'The configured checkout tax basis points require owner/accountant confirmation. This application does not determine the legally applicable rate.' },

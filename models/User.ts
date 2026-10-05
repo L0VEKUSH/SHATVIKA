@@ -3,7 +3,9 @@ import mongoose, { Schema, type Model } from 'mongoose';
 export type UserDoc = {
   _id: mongoose.Types.ObjectId;
   email: string;
-  password: string;
+  password?: string | null;
+  authProvider?: 'password' | 'google';
+  googleSubject?: string | null;
   passwordResetToken?: string | null;
   passwordResetExpires?: Date | null;
   passwordVersion: number;
@@ -106,7 +108,16 @@ const userSchema = new Schema(
       index: true,
     },
     // bcrypt hash string
-    password: { type: String, required: true, select: false },
+    password: {
+      type: String,
+      default: null,
+      select: false,
+      required: function (this: { authProvider?: string }) { return this.authProvider !== 'google'; },
+    },
+    authProvider: { type: String, enum: ['password', 'google'], default: 'password', index: true },
+    // The provider subject is the Google account identity. Email is profile
+    // data and is never used to silently link an existing password account.
+    googleSubject: { type: String, default: undefined, select: false },
     passwordResetToken: { type: String, default: null, select: false },
     passwordResetExpires: { type: Date, default: null, select: false },
     // Incremented when password changes; used in fingerprint to invalidate old tokens
@@ -155,6 +166,7 @@ userSchema.set('toJSON', {
     if (anyRet._id) anyRet.id = anyRet._id.toString();
     delete anyRet._id;
     delete anyRet.password;
+    delete anyRet.googleSubject;
     delete anyRet.passwordVersion;
     delete anyRet.passwordResetToken;
     delete anyRet.passwordResetExpires;
@@ -166,6 +178,10 @@ userSchema.set('toJSON', {
 // Email/phone indexes are declared on the fields above. Re-declaring them here
 // creates conflicting index specifications under Mongoose 9.
 userSchema.index({ createdAt: -1 });
+userSchema.index(
+  { googleSubject: 1 },
+  { unique: true, partialFilterExpression: { googleSubject: { $type: 'string' } } },
+);
 
 export const User: Model<any> =
   (mongoose.models.User as Model<any> | undefined) ?? mongoose.model('User', userSchema);

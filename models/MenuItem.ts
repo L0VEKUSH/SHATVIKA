@@ -55,6 +55,7 @@ const menuItemSchema = new Schema(
     available: { type: Boolean, default: true, index: true },
     isNewItem: { type: Boolean, default: false },
     // Inventory is shared by variants for the current product contract.
+    inventoryMode: { type: String, enum: ['tracked', 'unlimited'], default: 'tracked', index: true },
     quantity: { type: Number, default: 0, min: 0, validate: Number.isSafeInteger },
     quantitySold: { type: Number, default: 0, min: 0, validate: Number.isSafeInteger },
     quantityWasted: { type: Number, default: 0, min: 0, validate: Number.isSafeInteger },

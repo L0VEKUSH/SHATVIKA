@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { logServerError } from '@/lib/apiError';
 import {
   createCsrfToken,
   CSRF_COOKIE_NAME,
@@ -34,7 +35,7 @@ export async function GET(request: NextRequest) {
     }
     return response;
   } catch (error) {
-    console.error('[GET /api/csrf]', error instanceof Error ? error.message : 'Unknown error');
+    logServerError({ route: 'GET /api/csrf', err: error, requestId: request.headers.get('x-request-id') });
     return NextResponse.json(
       { ok: false, error: 'CSRF_UNAVAILABLE' },
       { status: 503, headers: { 'Cache-Control': 'no-store' } },

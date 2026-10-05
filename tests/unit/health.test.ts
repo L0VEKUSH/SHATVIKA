@@ -7,8 +7,13 @@ const complete = {
   NEXT_PUBLIC_SITE_URL: 'https://shop.example.test',
   ADMIN_JWT_SECRET: 'admin-session-secret-that-is-at-least-32-bytes',
   CUSTOMER_JWT_SECRET: 'customer-session-secret-that-is-at-least-32-bytes',
+  WORKER_JWT_SECRET: 'worker-session-secret-that-is-at-least-thirty-two-bytes',
   CSRF_SECRET: 'csrf-signing-secret-that-is-at-least-32-bytes',
   TAX_RATE_BASIS_POINTS: '500',
+  DELIVERY_ENABLED: 'false',
+  COUNTER_LOCATION_ID: 'test-counter',
+  COUNTER_LOCATION_NAME: 'Test Counter',
+  BUSINESS_TIME_ZONE: 'Asia/Kolkata',
   DELIVERY_FEE_PAISE: '4000',
   FREE_DELIVERY_THRESHOLD_PAISE: '50000',
   SERVICEABLE_POSTAL_CODES: '110001,110002',
@@ -50,6 +55,17 @@ describe('runtime configuration health', () => {
 
     expect(result.ready).toBe(false);
     expect(result.required.canonicalOrigin).toBe(false);
+  });
+
+  it('does not report checkout ready when the counter location or disabled-delivery capability is implicit', () => {
+    const missingLocation: Record<string, string> = { ...complete };
+    delete missingLocation.COUNTER_LOCATION_ID;
+    expect(assessRuntimeConfiguration(missingLocation).required.checkoutRules).toBe(false);
+
+    expect(assessRuntimeConfiguration({
+      ...complete,
+      DELIVERY_ENABLED: 'true',
+    }).required.checkoutRules).toBe(false);
   });
 
   it('reports partially configured optional integrations without exposing their values', () => {

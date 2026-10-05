@@ -12,6 +12,8 @@
     "test:unit": "vitest run tests/unit",
     "test:watch": "vitest",
     "test:integration": "vitest run tests/integration",
+    "test:e2e:isolated": "tsx scripts/e2e-isolated.ts",
+    "test:smoke": "node scripts/smoke-local.mjs",
     "build:production": "next build",
     "migrate:legacy:dry-run": "tsx scripts/migrate-legacy-records.ts",
     "migrate:legacy": "tsx scripts/migrate-legacy-records.ts --apply",
@@ -19,7 +21,7 @@
     "admin:repair": "tsx scripts/repair-legacy-admin.ts --apply",
     "worker:create": "tsx scripts/create-counter-worker.ts",
     "deps:review": "npm audit --audit-level=moderate",
-    "verify": "npm run typecheck && npm run lint && npm run test:unit && npm run test:integration && npm run deps:review && npm run build:production"
+    "verify": "npm run typecheck && npm run lint && npm run test:unit && npm run test:integration && npm run test:e2e:isolated && npm run deps:review && npm run build:production"
   },
   "engines": {
     "node": ">=24.11 <25",
@@ -41,6 +43,7 @@
     "lucide-react": "^0.454.0",
     "mongoose": "9.10.0",
     "next": "15.5.25",
+    "openid-client": "6.8.8",
     "pdfmake": "0.2.20",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -70,7 +73,7 @@
     "nanoid": "3.3.19",
     "dompurify": "3.4.15",
     "jsdom": {
-      "undici": "7.29.0"
+      "undici": "7.29.1"
     },
     "browserslist": "4.28.9",
     "baseline-browser-mapping": "2.11.22",

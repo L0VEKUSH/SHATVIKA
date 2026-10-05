@@ -7,6 +7,7 @@ import { CUSTOMER_COOKIE_NAME, verifyCustomerTokenState, type CustomerSessionSta
 import { logServerError } from '@/lib/apiError';
 import { connectToMongo } from '@/lib/mongoose';
 import { distributedRateLimit, getClientIp } from '@/lib/rateLimit';
+import { reviewOrderEligibilityFilter } from '@/lib/reviews/eligibility';
 import { AuditEvent } from '@/models/AuditEvent';
 import { Order } from '@/models/Order';
 import { Review } from '@/models/Review';
@@ -162,9 +163,11 @@ export async function POST(request: NextRequest) {
     let review: any;
     try {
       await session.withTransaction(async () => {
-        const orderFilter: Record<string, unknown> = { userId: state.accountId, orderStatus: 'delivered' };
-        if (parsed.data.orderId) orderFilter._id = parsed.data.orderId;
-        if (parsed.data.menuItemId) orderFilter['items.menuItemId'] = parsed.data.menuItemId;
+        const orderFilter = reviewOrderEligibilityFilter({
+          userId: state.accountId,
+          orderId: parsed.data.orderId,
+          menuItemId: parsed.data.menuItemId,
+        });
         const verifiedOrder = await Order.findOne(orderFilter).sort({ createdAt: -1 }).select('_id').session(session).lean();
         if (!verifiedOrder) throw new ReviewSubmissionError('NOT_VERIFIED', 403);
         const existing = await Review.exists({ userId: state.accountId, menuItemId: parsed.data.menuItemId ?? null }).session(session);

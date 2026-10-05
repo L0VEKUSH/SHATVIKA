@@ -19,6 +19,7 @@ const orderItemSchema = new Schema(
     categoryId: { type: String, default: 'unknown', index: true },
     categoryName: { type: String, default: 'Unknown' },
     quantity: { type: Number, required: true, min: 1, validate: Number.isSafeInteger },
+    inventoryMode: { type: String, enum: ['tracked', 'unlimited', null], default: null },
     unitPrice: { type: Number, required: true, min: 0 },
     totalPrice: { type: Number, required: true, min: 0 },
     unitPricePaise: { type: Number, min: 0, validate: Number.isSafeInteger },
@@ -66,7 +67,7 @@ const statusHistorySchema = new Schema(
     fromStatus: { type: String, enum: [...ORDER_STATUSES, null], default: null },
     status: { type: String, enum: ORDER_STATUSES, required: true },
     timestamp: { type: Date, default: Date.now, required: true },
-    actorType: { type: String, enum: ['customer', 'worker', 'admin', 'system'], default: 'system' },
+    actorType: { type: String, enum: ['customer', 'guest', 'worker', 'admin', 'system'], default: 'system' },
     actorId: { type: String, default: null },
     reason: { type: String, default: null, maxlength: 300 },
     note: { type: String, default: null, maxlength: 500 },
@@ -76,7 +77,18 @@ const statusHistorySchema = new Schema(
 
 const orderSchema = new Schema(
   {
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    // New counter orders belong either to a registered/Google account or to a
+    // server-issued guest session. Historical account orders remain unchanged.
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
+    guestSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'GuestSession', default: null, index: true },
+    claimedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
+    claimedAt: { type: Date, default: null },
+    customerIdentityType: {
+      type: String,
+      enum: ['guest', 'google', 'registered', 'legacy'],
+      default: 'legacy',
+      index: true,
+    },
     // Missing fulfillmentType means a historical delivery order. New orders must
     // set `counter` explicitly; migration never rewrites legacy delivery meaning.
     fulfillmentType: { type: String, enum: ['counter', 'delivery', null], default: null, index: true },
@@ -131,7 +143,11 @@ const orderSchema = new Schema(
       type: deliveryAddressSchema,
       default: null,
       required: function (this: { fulfillmentType?: 'counter' | 'delivery' | null }) {
-        return this.fulfillmentType !== 'counter';
+        // Only explicit delivery orders require a delivery address. A missing
+        // fulfillment type is a preserved legacy delivery record and may
+        // predate address snapshots; state changes must not invent that data
+        // or fail merely because historical evidence is absent.
+        return this.fulfillmentType === 'delivery';
       },
     },
     specialInstructions: { type: String, default: null, trim: true, maxlength: 500 },
@@ -153,6 +169,12 @@ const orderSchema = new Schema(
 );
 
 orderSchema.pre('validate', function () {
+  // New counter checkout always has an account or server-issued guest owner.
+  // Historical delivery records may predate either ownership field and remain
+  // operable by authorized staff without fabricating a customer association.
+  if (this.fulfillmentType === 'counter' && !this.userId && !this.guestSessionId) {
+    this.invalidate('userId', 'An account or guest session owner is required');
+  }
   this.subtotalPaise = legacyRupeesOrPaise(this.subtotalPaise, this.subtotal, 'subtotal');
   this.discountPaise = legacyRupeesOrPaise(this.discountPaise, this.discount, 'discount');
   this.taxPaise = legacyRupeesOrPaise(this.taxPaise, this.tax, 'tax');
@@ -187,6 +209,8 @@ orderSchema.set('toJSON', {
 });
 
 orderSchema.index({ userId: 1, createdAt: -1 });
+orderSchema.index({ guestSessionId: 1, createdAt: -1 });
+orderSchema.index({ claimedByUserId: 1, createdAt: -1 });
 orderSchema.index({ orderStatus: 1, createdAt: -1 });
 orderSchema.index({ paymentStatus: 1, createdAt: -1 });
 orderSchema.index({ actualDeliveryTime: -1, orderStatus: 1 });
@@ -201,7 +225,23 @@ orderSchema.index({ fulfillmentLocationId: 1, tokenBusinessDate: -1, tokenSequen
 orderSchema.index({ fulfillmentLocationId: 1, tokenBusinessDate: -1, tokenNumber: 1 });
 orderSchema.index(
   { userId: 1, idempotencyKey: 1 },
-  { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } },
+  {
+    unique: true,
+    partialFilterExpression: {
+      userId: { $type: 'objectId' },
+      idempotencyKey: { $type: 'string' },
+    },
+  },
+);
+orderSchema.index(
+  { guestSessionId: 1, idempotencyKey: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      guestSessionId: { $type: 'objectId' },
+      idempotencyKey: { $type: 'string' },
+    },
+  },
 );
 
 export const Order: Model<any> =

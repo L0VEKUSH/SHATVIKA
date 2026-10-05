@@ -70,7 +70,11 @@ export default function FinancePage() {
   }
 
   async function voidExpense(expense: Expense) {
-    const reason = window.prompt('Reason for voiding this expense record:')?.trim(); if (!reason || reason.length < 3) return;
+    const reason = window.prompt('Reason for voiding this expense record:')?.trim();
+    if (!reason || reason.length < 3 || reason.length > 300) {
+      window.alert('Enter a void reason between 3 and 300 characters.');
+      return;
+    }
     setBusy(true); setError('');
     try { await apiRequest(`/api/admin/expenses/${expense.id}`, { method: 'PATCH', body: { reason, expectedVersion: expense.stateVersion } }); setNotice('Expense voided with an audit reason.'); await load(); }
     catch (caught) { setError(message(caught)); } finally { setBusy(false); }

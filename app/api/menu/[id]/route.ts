@@ -2,8 +2,11 @@ import mongoose from 'mongoose';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getAdminSessionState } from '@/lib/adminJwt';
+import { logServerError } from '@/lib/apiError';
 import { connectToMongo } from '@/lib/mongoose';
 import { MenuItem } from '@/models/MenuItem';
+import { INVENTORY_MODES } from '@/lib/inventory';
+import { AuditEvent } from '@/models/AuditEvent';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,6 +36,7 @@ const patchSchema = z.object({
   spicy: z.boolean().optional(),
   vegetarian: z.boolean().optional(),
   available: z.boolean().optional(),
+  inventoryMode: z.enum(INVENTORY_MODES).optional(),
   isNew: z.boolean().optional(),
   isNewItem: z.boolean().optional(),
   quantity: z.number().int().nonnegative().max(1_000_000).optional(),
@@ -68,7 +72,7 @@ export async function GET(
     if (!item) return NextResponse.json({ ok: false, error: 'MENU_ITEM_NOT_FOUND' }, { status: 404 });
     return NextResponse.json(item);
   } catch (error) {
-    console.error('[GET /api/menu/:id]', error instanceof Error ? error.message : 'Unknown error');
+    logServerError({ route: 'GET /api/menu/:id', err: error, requestId: request.headers.get('x-request-id') });
     return NextResponse.json({ ok: false, error: 'MENU_UNAVAILABLE' }, { status: 503 });
   }
 }
@@ -86,22 +90,71 @@ export async function PUT(
     return NextResponse.json({ ok: false, error: 'VALIDATION_FAILED', details: parsed.error.flatten() }, { status: 400 });
   }
   try {
-    const item = await MenuItem.findById(id);
-    if (!item) return NextResponse.json({ ok: false, error: 'MENU_ITEM_NOT_FOUND' }, { status: 404 });
     const { isNew, ...patch } = parsed.data;
-    item.set({ ...patch, ...(isNew === undefined ? {} : { isNewItem: isNew }) });
-    const hasVariants = item.variants?.length > 0;
-    const hasBase = item.basePrice !== undefined && item.basePrice !== null;
-    if (hasVariants === hasBase) {
+    const inventoryConfigurationChange = parsed.data.inventoryMode !== undefined ||
+      parsed.data.quantity !== undefined || parsed.data.reorderPoint !== undefined;
+    let savedItem: any = null;
+
+    if (inventoryConfigurationChange) {
+      const session = await mongoose.startSession();
+      try {
+        await session.withTransaction(async () => {
+          const item = await MenuItem.findById(id).session(session);
+          if (!item) throw new Error('MENU_ITEM_NOT_FOUND');
+          const before = {
+            inventoryMode: item.inventoryMode ?? null,
+            quantity: Number.isSafeInteger(item.quantity) ? item.quantity : null,
+            reorderPoint: Number.isSafeInteger(item.reorderPoint) ? item.reorderPoint : null,
+          };
+          item.set({ ...patch, ...(isNew === undefined ? {} : { isNewItem: isNew }) });
+          const hasVariants = item.variants?.length > 0;
+          const hasBase = item.basePrice !== undefined && item.basePrice !== null;
+          if (hasVariants === hasBase) throw new Error('PRICE_CONTRACT_INVALID');
+          await item.save({ session });
+          await AuditEvent.create([{
+            actorType: 'admin',
+            actorId: auth.accountId,
+            action: 'menu.inventory_configuration.update',
+            resourceType: 'menu_item',
+            resourceId: id,
+            correlationId: request.headers.get('x-request-id'),
+            outcome: 'success',
+            metadata: {
+              before,
+              after: {
+                inventoryMode: item.inventoryMode,
+                quantity: item.quantity,
+                reorderPoint: item.reorderPoint,
+              },
+            },
+          }], { session });
+          savedItem = item;
+        });
+      } finally {
+        await session.endSession();
+      }
+    } else {
+      const item = await MenuItem.findById(id);
+      if (!item) return NextResponse.json({ ok: false, error: 'MENU_ITEM_NOT_FOUND' }, { status: 404 });
+      item.set({ ...patch, ...(isNew === undefined ? {} : { isNewItem: isNew }) });
+      const hasVariants = item.variants?.length > 0;
+      const hasBase = item.basePrice !== undefined && item.basePrice !== null;
+      if (hasVariants === hasBase) return NextResponse.json({ ok: false, error: 'PRICE_CONTRACT_INVALID' }, { status: 400 });
+      await item.save();
+      savedItem = item;
+    }
+    return NextResponse.json({ ok: true, item: savedItem.toJSON() });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'MENU_ITEM_NOT_FOUND') {
+      return NextResponse.json({ ok: false, error: 'MENU_ITEM_NOT_FOUND' }, { status: 404 });
+    }
+    if (error instanceof Error && error.message === 'PRICE_CONTRACT_INVALID') {
       return NextResponse.json({ ok: false, error: 'PRICE_CONTRACT_INVALID' }, { status: 400 });
     }
-    await item.save();
-    return NextResponse.json({ ok: true, item: item.toJSON() });
-  } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 11000) {
       return NextResponse.json({ ok: false, error: 'MENU_NAME_EXISTS' }, { status: 409 });
     }
-    console.error('[PUT /api/menu/:id]', error instanceof Error ? error.message : 'Unknown error');
+    logServerError({ route: 'PUT /api/menu/:id', err: error, requestId: request.headers.get('x-request-id') });
     return NextResponse.json({ ok: false, error: 'MENU_UPDATE_FAILED' }, { status: 500 });
   }
 }

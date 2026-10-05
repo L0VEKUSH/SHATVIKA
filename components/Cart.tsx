@@ -8,6 +8,7 @@ import { useAdmin } from '@/context/AdminContext';
 import { useAuth } from '@/context/AuthContext';
 import { CartItem, MenuItem } from '@/types';
 import { ApiClientError, apiRequest } from '@/lib/apiClient';
+import { availableQuantity, resolveInventoryMode } from '@/lib/inventory';
 
 interface CartProps {
   isOpen: boolean;
@@ -161,6 +162,13 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
   const [orderToken, setOrderToken] = useState<OrderConfirmation | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [checkoutPending, setCheckoutPending] = useState(false);
+  const [googleAvailable, setGoogleAvailable] = useState<boolean | null>(null);
+  const [claimableGuestOrders, setClaimableGuestOrders] = useState(0);
+  const [claimingGuestOrders, setClaimingGuestOrders] = useState(false);
+  const [stockIssues, setStockIssues] = useState<Record<string, string>>({});
+  const [stockCheckPending, setStockCheckPending] = useState(false);
+  const [stockCheckError, setStockCheckError] = useState<string | null>(null);
+  const [stockRefresh, setStockRefresh] = useState(0);
   const checkoutKey = useRef<string | null>(null);
 
   // Sync active tab when cart opens
@@ -180,6 +188,55 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
   const checkoutSignature = `${cartSignature}|coupon:${appliedCoupon?.code ?? ''}`;
 
   useEffect(() => {
+    if (!isOpen || !items.length) {
+      setStockIssues({});
+      setStockCheckError(null);
+      return;
+    }
+    let cancelled = false;
+    setStockCheckPending(true);
+    setStockCheckError(null);
+    void apiRequest<MenuItem[]>('/api/menu?availability=1', { cache: 'no-store' })
+      .then((products) => {
+        if (cancelled) return;
+        const byId = new Map(products.map(product => [
+          String(product.id ?? (product as MenuItem & { _id?: string })._id),
+          product,
+        ]));
+        const requested = new Map<string, number>();
+        for (const item of items) requested.set(item.menuItemId, (requested.get(item.menuItemId) ?? 0) + item.quantity);
+        const next: Record<string, string> = {};
+        for (const [menuItemId, quantity] of requested) {
+          const product = byId.get(menuItemId);
+          const name = items.find(item => item.menuItemId === menuItemId)?.menuItemName ?? 'An item';
+          if (!product || product.available === false) {
+            next[menuItemId] = `${name} is unavailable.`;
+            continue;
+          }
+          const mode = resolveInventoryMode(product);
+          if (mode === 'unconfigured') {
+            next[menuItemId] = `${name} cannot be ordered until inventory is configured.`;
+            continue;
+          }
+          if (mode === 'tracked') {
+            const available = availableQuantity(product) ?? 0;
+            if (available < quantity) {
+              next[menuItemId] = available > 0 ? `Only ${available} ${name} available.` : `${name} is out of stock.`;
+            }
+          }
+        }
+        setStockIssues(next);
+      })
+      .catch(() => {
+        if (!cancelled) setStockCheckError('Current stock could not be refreshed. Retry before confirming.');
+      })
+      .finally(() => {
+        if (!cancelled) setStockCheckPending(false);
+      });
+    return () => { cancelled = true; };
+  }, [cartSignature, isOpen, items, stockRefresh]);
+
+  useEffect(() => {
     setCheckoutError(null);
     try {
       const stored = JSON.parse(window.sessionStorage.getItem(CHECKOUT_RETRY_STORAGE_KEY) ?? 'null') as { signature?: string; key?: string } | null;
@@ -195,6 +252,19 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
     }
   }, [cartSignature, checkoutSignature]);
 
+  useEffect(() => {
+    apiRequest<{ ok: true; available: boolean }>('/api/auth/google/status', { cache: 'no-store' })
+      .then(result => setGoogleAvailable(result.available))
+      .catch(() => setGoogleAvailable(false));
+  }, []);
+
+  useEffect(() => {
+    if (!customer) { setClaimableGuestOrders(0); return; }
+    apiRequest<{ ok: true; available: number }>('/api/user/guest-orders/claim', { cache: 'no-store' })
+      .then(result => setClaimableGuestOrders(result.available))
+      .catch(() => setClaimableGuestOrders(0));
+  }, [customer]);
+
   // Coupon validation is server-authoritative, but remains provisional until the transaction commits.
   const discountAmount = appliedCoupon ? appliedCoupon.discountPaise / 100 : 0;
   const subtotalAfterDiscount = Math.max(0, subtotal - discountAmount);
@@ -204,15 +274,19 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
       setCheckoutError('Your cart is empty.');
       return;
     }
-
-    if (!customer) {
-      window.location.assign('/auth/login?returnTo=%2F%3FconfirmOrder%3D1');
+    if (stockCheckPending || stockCheckError || Object.keys(stockIssues).length) {
+      setCheckoutError(stockCheckError ?? Object.values(stockIssues)[0] ?? 'Wait for the stock check to finish.');
       return;
     }
 
     try {
       setCheckoutPending(true);
       setCheckoutError(null);
+      if (!customer) {
+        // Establish the HttpOnly owner cookie in a separate response first so
+        // an ambiguous order timeout can recover under the same guest owner.
+        await apiRequest('/api/guest/session', { cache: 'no-store' });
+      }
       checkoutKey.current ??= crypto.randomUUID();
       window.sessionStorage.setItem(CHECKOUT_RETRY_STORAGE_KEY, JSON.stringify({
         signature: checkoutSignature,
@@ -241,21 +315,46 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
       setActiveTab('cart');
     } catch (err) {
       const messages: Record<string, string> = {
-        UNAUTHENTICATED: 'Please sign in before checking out.',
+        UNAUTHENTICATED: 'Your private guest session could not be established. Refresh and try again.',
+        GUEST_SESSION_UNAVAILABLE: 'Guest checkout is temporarily unavailable. Your cart was kept.',
+        GUEST_OUTSTANDING_ORDER_LIMIT: 'This browser already has the maximum number of unpaid active orders. Pay or collect an existing order before trying again.',
         CHECKOUT_NOT_CONFIGURED: 'Ordering is temporarily unavailable while the configured tax rule is checked.',
         TRANSACTION_DATABASE_REQUIRED: 'Ordering is temporarily unavailable because safe stock transactions are not configured.',
         INSUFFICIENT_STOCK: 'An item just sold out. Your cart was kept; review it and try again.',
+        INVENTORY_NOT_CONFIGURED: 'An item needs inventory setup by an administrator. Your cart was kept.',
         MENU_ITEM_UNAVAILABLE: 'An item in your cart is no longer available.',
         VARIANT_UNAVAILABLE: 'A selected option is no longer available.',
         IDEMPOTENCY_KEY_REUSED: 'The basket changed during checkout. Please try again.',
+        UPLOAD_STORAGE_NOT_CONFIGURED: 'Checkout received a media-upload response instead of an order response. Your cart was kept. Refresh the page and retry with the same basket; the saved request key prevents a duplicate order.',
       };
-      setCheckoutError(
-        err instanceof ApiClientError
-          ? messages[err.code] || err.message
-          : 'Confirmation may not have completed. Your cart was kept; retry to safely recover the same order.',
-      );
+      const details = err instanceof ApiClientError && err.details && typeof err.details === 'object'
+        ? err.details as { available?: unknown }
+        : null;
+      const stockMessage = err instanceof ApiClientError && err.code === 'INSUFFICIENT_STOCK' &&
+        typeof details?.available === 'number'
+        ? details.available > 0 ? `Only ${details.available} available. Your cart was kept.` : 'An item is out of stock. Your cart was kept.'
+        : null;
+      setCheckoutError(err instanceof ApiClientError
+        ? stockMessage ?? (messages[err.code] || err.message)
+        : 'Confirmation may not have completed. Your cart was kept; retry to safely recover the same order.');
+      setStockRefresh(value => value + 1);
     } finally {
       setCheckoutPending(false);
+    }
+  };
+
+  const claimGuestOrders = async () => {
+    if (!customer || claimingGuestOrders) return;
+    setClaimingGuestOrders(true);
+    setCheckoutError(null);
+    try {
+      const result = await apiRequest<{ ok: true; claimed: number }>('/api/user/guest-orders/claim', { method: 'POST' });
+      setClaimableGuestOrders(0);
+      setCheckoutError(result.claimed > 0 ? `${result.claimed} guest order${result.claimed === 1 ? '' : 's'} saved to your account.` : 'Guest orders are already saved.');
+    } catch (error) {
+      setCheckoutError(error instanceof ApiClientError ? error.message : 'Guest orders could not be linked. Nothing was duplicated.');
+    } finally {
+      setClaimingGuestOrders(false);
     }
   };
 
@@ -328,6 +427,8 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
               </div>
 
               <p className="mt-4 text-xs leading-5 text-amber-100">Delivery currently unavailable — collect at Shatvika Corner. Keep this token; it remains available in My Orders.</p>
+              {!customer && <p className="mt-2 text-[11px] leading-5 text-gray-400">Guest history is saved privately in this browser and may be lost if browser data is cleared or the guest session expires.</p>}
+              <a href="/orders" className="mt-4 block min-h-11 rounded-xl border border-white/15 px-4 py-3 text-sm font-bold text-white hover:bg-white/5">Open My Orders</a>
               <button
                 type="button"
                 onClick={() => { setOrderToken(null); onClose(); }}
@@ -519,6 +620,17 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
                           {checkoutError}
                         </p>
                       )}
+                      {(stockCheckPending || stockCheckError || Object.keys(stockIssues).length > 0) && (
+                        <div role="status" className="mb-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                          {stockCheckPending ? <p>Checking current stock…</p> : (
+                            <>
+                              {stockCheckError && <p>{stockCheckError}</p>}
+                              {Object.values(stockIssues).map(message => <p key={message}>{message}</p>)}
+                              <button type="button" onClick={() => setStockRefresh(value => value + 1)} className="mt-1 font-bold underline underline-offset-2">Retry stock check</button>
+                            </>
+                          )}
+                        </div>
+                      )}
                       {cartPersistenceError && (
                         <div role="alert" className="mb-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
                           <p>{cartPersistenceError}</p>
@@ -532,14 +644,31 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
                       {isCartSyncing && customer && (
                         <p role="status" className="mb-3 text-center text-[10px] text-gray-500">Saving cart to your account…</p>
                       )}
+                      {customer && claimableGuestOrders > 0 && (
+                        <div className="mb-3 rounded-xl border border-sky-400/20 bg-sky-400/10 p-3 text-xs text-sky-100">
+                          <p>{claimableGuestOrders} order{claimableGuestOrders === 1 ? '' : 's'} from this browser can be saved to your account.</p>
+                          <button type="button" onClick={() => void claimGuestOrders()} disabled={claimingGuestOrders} className="mt-2 font-bold underline underline-offset-2 disabled:opacity-50">{claimingGuestOrders ? 'Saving…' : 'Save authorized guest orders'}</button>
+                        </div>
+                      )}
                       <button
                         onClick={handleCheckout}
-                        disabled={checkoutPending}
+                        disabled={checkoutPending || stockCheckPending || Boolean(stockCheckError) || Object.keys(stockIssues).length > 0}
                         className="btn-flame w-full py-4 text-base font-bold flex items-center justify-center gap-2 group disabled:opacity-50"
                       >
-                        <span>{checkoutPending ? 'Confirming safely…' : customer ? 'Confirm order & get token' : 'Sign in to confirm order'}</span>
+                        <span>{checkoutPending ? 'Confirming safely…' : 'Confirm order & get token'}</span>
                         <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                       </button>
+
+                      {!customer && (
+                        <div className="mt-3 text-center text-xs text-gray-400">
+                          {googleAvailable === true ? (
+                            <a href="/api/auth/google/start?returnTo=%2F%3FconfirmOrder%3D1" className="inline-flex min-h-10 items-center justify-center rounded-lg border border-white/15 px-4 py-2 font-semibold text-white hover:bg-white/5">Continue with Google (optional)</a>
+                          ) : googleAvailable === false ? (
+                            <p>Google sign-in is not configured. Guest checkout remains available.</p>
+                          ) : <p>Checking optional account sign-in…</p>}
+                          <p className="mt-2 text-[10px] leading-4 text-gray-500">Google may request its own authentication or security verification. A Shatvika password or OTP is not required for guest checkout.</p>
+                        </div>
+                      )}
 
                       <p className="mt-3 text-center text-[11px] text-amber-200/80">Delivery currently unavailable — collect at Shatvika Corner. Pay at counter by cash or verified UPI.</p>
                     </div>

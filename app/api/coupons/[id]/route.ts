@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getAdminSessionState } from '@/lib/adminJwt';
+import { logServerError } from '@/lib/apiError';
 import { Coupon } from '@/models/Coupon';
 
 export const dynamic = 'force-dynamic';
@@ -59,7 +60,7 @@ export async function PUT(
     await coupon.save();
     return NextResponse.json({ ok: true, coupon: coupon.toJSON() });
   } catch (error) {
-    console.error('[PUT /api/coupons/:id]', error instanceof Error ? error.message : 'Unknown error');
+    logServerError({ route: 'PUT /api/coupons/:id', err: error, requestId: request.headers.get('x-request-id') });
     return NextResponse.json({ ok: false, error: 'COUPON_UPDATE_FAILED' }, { status: 500 });
   }
 }

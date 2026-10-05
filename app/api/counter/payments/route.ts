@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { OrderServiceError, recordCounterPayment } from '@/lib/orders/service';
 import { distributedRateLimit } from '@/lib/rateLimit';
 import { getWorkerSessionState } from '@/lib/workerJwt';
+import { logServerError } from '@/lib/apiError';
 
 const paymentSchema = z.object({
   orderId: z.string().trim().min(1).max(64),
@@ -70,6 +71,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof OrderServiceError) {
       return NextResponse.json({ ok: false, error: error.code, details: error.details }, { status: error.status });
     }
+    logServerError({ route: 'POST /api/counter/payments', err: error, requestId: request.headers.get('x-request-id') });
     return NextResponse.json({ ok: false, error: 'PAYMENT_RECORDING_FAILED' }, { status: 500 });
   }
 }

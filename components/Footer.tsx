@@ -33,7 +33,7 @@ export default function Footer() {
         <div className="relative z-10 mx-auto flex max-w-7xl flex-col items-center justify-between gap-8 px-6 py-14 md:flex-row md:px-8">
           <div>
             <h2 className="mb-2 text-3xl font-black text-white md:text-4xl">Explore the <span className="flame-text">menu</span></h2>
-            <p className="text-sm text-gray-400 md:text-base">Availability, prices, charges, and delivery estimates are confirmed at checkout.</p>
+            <p className="text-sm text-gray-400 md:text-base">Availability, discounts, and configured tax are confirmed before your counter token is issued.</p>
           </div>
           <a href="#menu" onClick={event => { event.preventDefault(); scrollTo('#menu'); }} className="btn-flame flex shrink-0 items-center gap-2 px-7 py-3.5 text-sm font-bold">View menu <ArrowRight className="h-4 w-4" aria-hidden="true" /></a>
         </div>
@@ -67,7 +67,7 @@ export default function Footer() {
         <motion.section aria-labelledby="footer-policies" initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}>
           <h2 id="footer-policies" className="mb-5 text-sm font-bold uppercase tracking-wider text-white">Business information</h2>
           <ul className="space-y-2.5">
-            <li><Link href="/policies#delivery" className="text-sm text-gray-500 hover:text-[#FF8C00]">Delivery policy</Link></li>
+            <li><Link href="/policies#delivery" className="text-sm text-gray-500 hover:text-[#FF8C00]">Collection and delivery status</Link></li>
             <li><Link href="/policies#cancellation" className="text-sm text-gray-500 hover:text-[#FF8C00]">Cancellation and refunds</Link></li>
             <li><Link href="/policies#privacy" className="text-sm text-gray-500 hover:text-[#FF8C00]">Privacy notice</Link></li>
             <li><Link href="/policies#tax" className="text-sm text-gray-500 hover:text-[#FF8C00]">Tax information</Link></li>

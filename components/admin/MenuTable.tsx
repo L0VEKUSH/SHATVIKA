@@ -101,6 +101,47 @@ function VariantsCell({ item }: { item: MenuItem }) {
   );
 }
 
+function InventoryCell({ item }: { item: MenuItem }) {
+  const { updateMenuItem } = useAdmin();
+  const initialMode = item.inventoryMode ?? (Number.isSafeInteger(item.quantity) ? 'tracked' : '');
+  const [mode, setMode] = useState<'tracked' | 'unlimited' | ''>(initialMode);
+  const [quantity, setQuantity] = useState(Number.isSafeInteger(item.quantity) ? Number(item.quantity) : 0);
+  const [reorderPoint, setReorderPoint] = useState(Number.isSafeInteger(item.reorderPoint) ? Number(item.reorderPoint) : 5);
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (!mode || saving) return;
+    setSaving(true);
+    await updateMenuItem(item.id, {
+      inventoryMode: mode,
+      ...(mode === 'tracked' ? {
+        reorderPoint,
+        ...(!initialMode ? { quantity } : {}),
+      } : {}),
+    });
+    setSaving(false);
+  };
+
+  return (
+    <div className="min-w-[180px] space-y-2">
+      <select aria-label={`Inventory mode for ${item.name}`} value={mode} onChange={event => setMode(event.target.value as 'tracked' | 'unlimited' | '')} className="w-full rounded-lg border border-white/10 bg-[#111] px-2 py-1 text-xs text-white">
+        <option value="" disabled>Setup required</option>
+        <option value="tracked">Tracked stock</option>
+        <option value="unlimited">Unlimited / made to order</option>
+      </select>
+      {mode === 'tracked' && (
+        <div className="flex gap-2">
+          {!initialMode ? <label className="text-[10px] text-gray-500">Initial available<input aria-label={`Available quantity for ${item.name}`} type="number" min="0" max="1000000" value={quantity} onChange={event => setQuantity(Math.max(0, Number(event.target.value) || 0))} className="mt-1 w-20 rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs text-white" /></label> : <p className="self-end text-[10px] text-gray-400">Available: {item.quantity ?? 'unknown'}</p>}
+          <label className="text-[10px] text-gray-500">Low at<input aria-label={`Reorder point for ${item.name}`} type="number" min="0" max="1000000" value={reorderPoint} onChange={event => setReorderPoint(Math.max(0, Number(event.target.value) || 0))} className="mt-1 w-20 rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs text-white" /></label>
+        </div>
+      )}
+      {!initialMode && <p className="text-[10px] font-semibold text-amber-300">Legacy item: choose a mode before sale.</p>}
+      {initialMode === 'tracked' && <a href="/admin/finance" className="block text-[10px] text-gray-400 underline underline-offset-2">Use Costs &amp; stock for audited quantity changes</a>}
+      <button type="button" disabled={!mode || saving} onClick={() => void save()} className="rounded-lg border border-[#FF8C00]/30 px-2 py-1 text-[10px] font-bold text-[#FF8C00] disabled:opacity-40">{saving ? 'Saving…' : 'Save inventory'}</button>
+    </div>
+  );
+}
+
 /* ── Add Item Modal ── */
 function AddItemModal({ onClose }: { onClose: () => void }) {
   const { addMenuItem } = useAdmin();
@@ -108,6 +149,7 @@ function AddItemModal({ onClose }: { onClose: () => void }) {
     name: '', description: '', category: 'Burgers' as Category,
     emoji: '🍔', gradientClass: 'grad-burger',
     popular: false, spicy: false, vegetarian: false, isNew: true,
+    inventoryMode: 'tracked' as 'tracked' | 'unlimited', quantity: 0, reorderPoint: 5,
   });
   const [variants, setVariants] = useState<Variant[]>([
     { id: `v-${crypto.randomUUID()}`, name: 'Regular', price: 99, available: true }
@@ -170,6 +212,13 @@ function AddItemModal({ onClose }: { onClose: () => void }) {
             <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value as Category }))} className="input-flame text-sm appearance-none">
               {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <label className="col-span-3 text-xs text-gray-500">Inventory mode<select value={form.inventoryMode} onChange={event => setForm(current => ({ ...current, inventoryMode: event.target.value as 'tracked' | 'unlimited' }))} className="input-flame mt-1 text-sm"><option value="tracked">Tracked stock</option><option value="unlimited">Unlimited / made to order</option></select></label>
+            {form.inventoryMode === 'tracked' && <>
+              <label className="text-xs text-gray-500">Available<input type="number" min="0" max="1000000" value={form.quantity} onChange={event => setForm(current => ({ ...current, quantity: Math.max(0, Number(event.target.value) || 0) }))} className="input-flame mt-1 text-sm" /></label>
+              <label className="text-xs text-gray-500">Low-stock point<input type="number" min="0" max="1000000" value={form.reorderPoint} onChange={event => setForm(current => ({ ...current, reorderPoint: Math.max(0, Number(event.target.value) || 0) }))} className="input-flame mt-1 text-sm" /></label>
+            </>}
           </div>
           <div>
             <p className="text-xs text-gray-500 mb-2 uppercase tracking-wider font-semibold">Card Style</p>
@@ -287,7 +336,7 @@ export default function MenuTable() {
         <table className="w-full">
           <thead className="bg-white/3">
             <tr>
-              {['Item', 'Category', 'Variants & Prices', 'Tags', 'Rating', ''].map((h, idx) => (
+              {['Item', 'Category', 'Variants & Prices', 'Inventory', 'Tags', 'Rating', ''].map((h, idx) => (
                 <th key={h || `col-${idx}`} className="px-4 py-3 text-left text-[10px] uppercase tracking-wider text-gray-600 font-semibold">{h}</th>
               ))}
             </tr>
@@ -321,6 +370,7 @@ export default function MenuTable() {
                   </td>
                   {/* Variants */}
                   <td className="px-4 py-3"><VariantsCell item={item} /></td>
+                  <td className="px-4 py-3"><InventoryCell item={item} /></td>
                   {/* Tags */}
                   <td className="px-4 py-3">
                     <div className="flex gap-1 flex-wrap">

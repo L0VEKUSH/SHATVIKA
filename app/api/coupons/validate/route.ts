@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { logServerError } from '@/lib/apiError';
 import { BusinessRulesConfigurationError } from '@/lib/businessRules';
-import { getCustomerSessionState } from '@/lib/customerJwt';
 import { CartQuoteError, quoteCustomerCart } from '@/lib/orders/cartQuote';
 import { distributedRateLimit } from '@/lib/rateLimit';
+import { applyGuestSessionCookie } from '@/lib/guestSession';
+import { OrderPrincipalError, resolveOrderPrincipal } from '@/lib/orderPrincipal';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,13 +21,6 @@ const schema = z.object({
 const PRIVATE_HEADERS = { 'Cache-Control': 'private, no-store' } as const;
 
 export async function POST(request: NextRequest) {
-  const customer = await getCustomerSessionState();
-  if (customer.status !== 'valid') {
-    return NextResponse.json(
-      { ok: false, error: customer.status === 'database_unavailable' ? 'DATABASE_UNAVAILABLE' : 'UNAUTHENTICATED' },
-      { status: customer.status === 'database_unavailable' ? 503 : 401, headers: PRIVATE_HEADERS },
-    );
-  }
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json(
@@ -36,7 +30,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const limit = await distributedRateLimit(`coupon-validate:${customer.accountId}`, 20, 60);
+    const principal = await resolveOrderPrincipal(request, { createGuest: true });
+    if (!principal) return NextResponse.json({ ok: false, error: 'UNAUTHENTICATED' }, { status: 401, headers: PRIVATE_HEADERS });
+    const subject = principal.kind === 'account' ? `account:${principal.accountId}` : `guest:${principal.guestSessionId}`;
+    const limit = await distributedRateLimit(`coupon-validate:${subject}`, 20, 60);
     if (!limit.allowed) {
       return NextResponse.json(
         { ok: false, error: 'TOO_MANY_REQUESTS', retryAfter: limit.retryAfter },
@@ -47,12 +44,13 @@ export async function POST(request: NextRequest) {
       );
     }
     const quote = await quoteCustomerCart({
-      userId: customer.accountId,
+      userId: principal.kind === 'account' ? principal.accountId : undefined,
+      guestSessionId: principal.kind === 'guest' ? principal.guestSessionId : undefined,
       lines: parsed.data.items,
       couponCode: parsed.data.code,
     });
     if (!quote.coupon) throw new CartQuoteError('COUPON_NOT_FOUND', 404);
-    return NextResponse.json({
+    const response = NextResponse.json({
       ok: true,
       coupon: quote.coupon,
       subtotalPaise: quote.subtotalPaise,
@@ -61,7 +59,12 @@ export async function POST(request: NextRequest) {
       provisional: true,
       message: 'Final eligibility and amount are revalidated atomically at checkout.',
     }, { headers: PRIVATE_HEADERS });
+    if (principal.kind === 'guest') applyGuestSessionCookie(response, principal.issuedSession);
+    return response;
   } catch (error) {
+    if (error instanceof OrderPrincipalError) {
+      return NextResponse.json({ ok: false, error: error.code }, { status: error.status, headers: PRIVATE_HEADERS });
+    }
     if (error instanceof CartQuoteError) {
       return NextResponse.json(
         { ok: false, error: error.code, details: error.details },

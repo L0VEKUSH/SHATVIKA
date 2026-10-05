@@ -45,11 +45,14 @@ export default function AdminSignupPage() {
 
         <form onSubmit={onSubmit} className="mt-6 space-y-4">
           <div>
-            <label className="block text-sm font-semibold text-gray-300 mb-2">Email</label>
+            <label htmlFor="admin-bootstrap-email" className="block text-sm font-semibold text-gray-300 mb-2">Email</label>
             <input
+              id="admin-bootstrap-email"
+              name="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               type="email"
+              autoComplete="username"
               required
               className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-[#FF4500]/50"
               placeholder="admin@example.com"
@@ -57,11 +60,14 @@ export default function AdminSignupPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-semibold text-gray-300 mb-2">Password</label>
+            <label htmlFor="admin-bootstrap-password" className="block text-sm font-semibold text-gray-300 mb-2">Password</label>
             <input
+              id="admin-bootstrap-password"
+              name="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               type="password"
+              autoComplete="new-password"
               required
               className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-[#FF4500]/50"
               placeholder="Create a password"
@@ -69,11 +75,15 @@ export default function AdminSignupPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-semibold text-gray-300 mb-2">Setup Key</label>
+            <label htmlFor="admin-bootstrap-key" className="block text-sm font-semibold text-gray-300 mb-2">Setup Key</label>
             <input
+              id="admin-bootstrap-key"
+              name="setupKey"
               value={setupKey}
               onChange={(e) => setSetupKey(e.target.value)}
               type="password"
+              autoComplete="off"
+              spellCheck={false}
               required
               className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-[#FF4500]/50"
               placeholder="Enter ADMIN_SETUP_KEY"

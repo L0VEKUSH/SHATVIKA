@@ -1,16 +1,15 @@
 import mongoose from 'mongoose';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { connectToMongo } from '@/lib/mongoose';
-import { getCustomerId, isCustomerAuthed } from '@/lib/customerAuth';
+import { logServerError } from '@/lib/apiError';
 import { OrderServiceError, transitionOrder } from '@/lib/orders/service';
+import {
+  OrderPrincipalError,
+  orderOwnershipFilter,
+  resolveOrderPrincipal,
+} from '@/lib/orderPrincipal';
 import { Order } from '@/models/Order';
-
-async function customerId(): Promise<string | null> {
-  await connectToMongo();
-  if (!(await isCustomerAuthed())) return null;
-  return getCustomerId();
-}
+import { operationalReasonSchema, validationErrorResponse } from '@/lib/validation';
 
 const notesSchema = z.object({
   specialInstructions: z.string().trim().max(500).optional(),
@@ -19,7 +18,7 @@ const notesSchema = z.object({
 }).strict();
 
 const cancellationSchema = z.object({
-  reason: z.string().trim().min(3).max(300),
+  reason: operationalReasonSchema,
   expectedVersion: z.number().int().nonnegative().optional(),
 }).strict();
 
@@ -28,13 +27,13 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const userId = await customerId();
-    if (!userId) return NextResponse.json({ ok: false, error: 'UNAUTHENTICATED' }, { status: 401 });
+    const principal = await resolveOrderPrincipal(_req);
+    if (!principal) return NextResponse.json({ ok: false, error: 'UNAUTHENTICATED' }, { status: 401 });
     const { id } = await params;
     if (!mongoose.isValidObjectId(id)) {
       return NextResponse.json({ ok: false, error: 'INVALID_ORDER_ID' }, { status: 400 });
     }
-    const order = await Order.findOne({ _id: id, userId })
+    const order = await Order.findOne({ _id: id, ...orderOwnershipFilter(principal) })
       .select('-idempotencyKey -requestFingerprint -adminNotes')
       .lean();
     if (!order) return NextResponse.json({ ok: false, error: 'NOT_FOUND' }, { status: 404 });
@@ -74,7 +73,10 @@ export async function GET(
       },
     }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
-    console.error('[GET /api/user/orders/:id]', error instanceof Error ? error.message : 'Unknown error');
+    if (error instanceof OrderPrincipalError) {
+      return NextResponse.json({ ok: false, error: error.code }, { status: error.status });
+    }
+    logServerError({ route: 'GET /api/user/orders/:id', err: error, requestId: _req.headers.get('x-request-id') });
     return NextResponse.json({ ok: false, error: 'DATABASE_UNAVAILABLE' }, { status: 503 });
   }
 }
@@ -84,15 +86,15 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const userId = await customerId();
-    if (!userId) return NextResponse.json({ ok: false, error: 'UNAUTHENTICATED' }, { status: 401 });
+    const principal = await resolveOrderPrincipal(req);
+    if (!principal) return NextResponse.json({ ok: false, error: 'UNAUTHENTICATED' }, { status: 401 });
     const { id } = await params;
     if (!mongoose.isValidObjectId(id)) {
       return NextResponse.json({ ok: false, error: 'INVALID_ORDER_ID' }, { status: 400 });
     }
     const parsed = notesSchema.safeParse(await req.json().catch(() => null));
     if (!parsed.success) {
-      return NextResponse.json({ ok: false, error: 'VALIDATION_FAILED', details: parsed.error.flatten() }, { status: 400 });
+      return validationErrorResponse(parsed.error);
     }
     const { expectedVersion, ...changes } = parsed.data;
     if (Object.keys(changes).length === 0) {
@@ -100,12 +102,12 @@ export async function PATCH(
     }
     const versionFilter = expectedVersion === undefined ? {} : { stateVersion: expectedVersion };
     const updated = await Order.findOneAndUpdate(
-      { _id: id, userId, orderStatus: { $in: ['placed', 'pending', 'accepted'] }, ...versionFilter },
+      { _id: id, ...orderOwnershipFilter(principal), orderStatus: { $in: ['placed', 'pending', 'accepted'] }, ...versionFilter },
       { $set: changes, $inc: { stateVersion: 1 } },
       { returnDocument: 'after', runValidators: true },
     ).select('-idempotencyKey -requestFingerprint -adminNotes').lean();
     if (!updated) {
-      const exists = await Order.findOne({ _id: id, userId }).select('orderStatus stateVersion').lean();
+      const exists = await Order.findOne({ _id: id, ...orderOwnershipFilter(principal) }).select('orderStatus stateVersion').lean();
       if (!exists) return NextResponse.json({ ok: false, error: 'NOT_FOUND' }, { status: 404 });
       return NextResponse.json({
         ok: false,
@@ -117,7 +119,10 @@ export async function PATCH(
     }
     return NextResponse.json({ ok: true, order: updated });
   } catch (error) {
-    console.error('[PATCH /api/user/orders/:id]', error instanceof Error ? error.message : 'Unknown error');
+    if (error instanceof OrderPrincipalError) {
+      return NextResponse.json({ ok: false, error: error.code }, { status: error.status });
+    }
+    logServerError({ route: 'PATCH /api/user/orders/:id', err: error, requestId: req.headers.get('x-request-id') });
     return NextResponse.json({ ok: false, error: 'UPDATE_FAILED' }, { status: 500 });
   }
 }
@@ -127,17 +132,19 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const userId = await customerId();
-    if (!userId) return NextResponse.json({ ok: false, error: 'UNAUTHENTICATED' }, { status: 401 });
+    const principal = await resolveOrderPrincipal(req);
+    if (!principal) return NextResponse.json({ ok: false, error: 'UNAUTHENTICATED' }, { status: 401 });
     const { id } = await params;
     const parsed = cancellationSchema.safeParse(await req.json().catch(() => null));
     if (!parsed.success) {
-      return NextResponse.json({ ok: false, error: 'VALIDATION_FAILED', details: parsed.error.flatten() }, { status: 400 });
+      return validationErrorResponse(parsed.error, 'Provide a cancellation reason between 3 and 300 characters.');
     }
     const order = await transitionOrder({
       orderId: id,
       nextStatus: 'cancelled',
-      actor: { type: 'customer', id: userId },
+      actor: principal.kind === 'account'
+        ? { type: 'customer', id: principal.accountId }
+        : { type: 'guest', id: principal.guestSessionId },
       expectedVersion: parsed.data.expectedVersion,
       reason: parsed.data.reason,
     });
@@ -151,10 +158,13 @@ export async function DELETE(
       },
     });
   } catch (error) {
+    if (error instanceof OrderPrincipalError) {
+      return NextResponse.json({ ok: false, error: error.code }, { status: error.status });
+    }
     if (error instanceof OrderServiceError) {
       return NextResponse.json({ ok: false, error: error.code, details: error.details }, { status: error.status });
     }
-    console.error('[DELETE /api/user/orders/:id]', error instanceof Error ? error.message : 'Unknown error');
+    logServerError({ route: 'DELETE /api/user/orders/:id', err: error, requestId: req.headers.get('x-request-id') });
     return NextResponse.json({ ok: false, error: 'CANCELLATION_FAILED' }, { status: 500 });
   }
 }

@@ -5,6 +5,7 @@ import { clearCustomerSession } from '@/lib/customerAuth';
 import { connectToMongo } from '@/lib/mongoose';
 import { hashPasswordResetToken, isPasswordResetTokenFormat } from '@/lib/passwordReset';
 import { authRateLimit } from '@/lib/authRateLimit';
+import { logServerError } from '@/lib/apiError';
 import { validatePassword } from '@/lib/validators';
 import { User } from '@/models/User';
 
@@ -104,7 +105,7 @@ export async function POST(request: Request) {
     await clearCustomerSession();
     return NextResponse.json({ ok: true, message: 'Password reset. Sign in with your new password.' });
   } catch (error) {
-    console.error('[ResetPassword] Request failed:', error instanceof Error ? error.message : 'unknown error');
+    logServerError({ route: 'POST /api/auth/reset-password', err: error, requestId: request.headers.get('x-request-id') });
     return NextResponse.json(
       { ok: false, error: 'RESET_FAILED', message: 'Password reset is temporarily unavailable.' },
       { status: 500 },

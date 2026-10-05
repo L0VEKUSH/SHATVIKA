@@ -10,14 +10,24 @@ describe('business analytics formulas', () => {
     expect(snapshot.overview.deliveredOrders.value).toBe(2);
     expect(snapshot.overview.cancelledOrders.value).toBe(1);
     expect(snapshot.overview.merchandiseSales.value).toBe(28_000);
-    expect(snapshot.overview.netMerchandiseSales.value).toBe(27_000);
+    expect(snapshot.overview.netMerchandiseSales.value).toBe(17_000);
     expect(snapshot.overview.collectedPayments.value).toBe(30_350);
     expect(snapshot.overview.refunds.value).toBe(10_400);
     expect(snapshot.overview.outstandingPayments.value).toBe(9_450);
-    expect(snapshot.overview.averageOrderValue.value).toBe(13_500);
+    expect(snapshot.overview.averageOrderValue.value).toBe(8_500);
     expect(snapshot.overview.grossMargin.value).toBeNull();
     expect(snapshot.overview.grossMargin.note).toBe('Cost data required');
     expect(snapshot.dataQuality.costCoveragePct).toBe(71.4);
+    expect(snapshot.tables.soldItems.find(row => row.orderId === 'order-delivered-returning')).toMatchObject({
+      netSalesPaise: 19_000,
+      refundAdjustmentPaise: 2_000,
+      grossProfitPaise: 5_000,
+    });
+    expect(snapshot.tables.soldItems.find(row => row.orderId === 'order-delivered-deleted-product')).toMatchObject({
+      netSalesPaise: 8_000,
+      refundAdjustmentPaise: 8_000,
+      grossProfitPaise: null,
+    });
   });
 
   it('uses purchase history before the period and immutable names when available', () => {
@@ -126,12 +136,12 @@ describe('business analytics formulas', () => {
     };
     const unconfirmed = computeAnalyticsSnapshot({ ...common, rawExpensePeriods: [] });
     expect(unconfirmed.overview.costOfGoodsSold.value).toBe(15_000);
-    expect(unconfirmed.overview.grossMargin.value).toBe(12_000);
-    expect(unconfirmed.overview.recordedNetProfit.value).toBe(10_000);
+    expect(unconfirmed.overview.grossMargin.value).toBe(2_000);
+    expect(unconfirmed.overview.recordedNetProfit.value).toBe(0);
     expect(unconfirmed.overview.finalizedNetProfit.value).toBeNull();
 
     const confirmed = computeAnalyticsSnapshot({ ...common, rawExpensePeriods: [{ month: '2026-09', complete: true }] });
-    expect(confirmed.overview.finalizedNetProfit.value).toBe(10_000);
+    expect(confirmed.overview.finalizedNetProfit.value).toBe(0);
     expect(confirmed.expenses.completenessConfirmed).toBe(true);
   });
 
@@ -152,5 +162,21 @@ describe('business analytics formulas', () => {
 
     expect(snapshot.overview.newCustomers).toMatchObject({ value: 1, previous: 0, comparison: 'new' });
     expect(snapshot.overview.returningCustomers).toMatchObject({ value: 1, previous: 1, changePct: 0, comparison: 'percent' });
+  });
+
+  it('distinguishes unlimited and unconfigured inventory from genuine stockouts', () => {
+    const base = analyticsServiceFixture();
+    const snapshot = computeAnalyticsSnapshot({
+      ...base,
+      rawProducts: [
+        ...base.rawProducts,
+        { _id: 'unlimited-product', name: 'Made to order', category: 'Momos', categoryId: 'momos', inventoryMode: 'unlimited', available: true, variants: [] },
+        { _id: 'legacy-unconfigured', name: 'Legacy item', category: 'Fries', categoryId: 'fries', available: true, variants: [] },
+        { _id: 'real-stockout', name: 'Tracked zero', category: 'Drinks', categoryId: 'drinks', inventoryMode: 'tracked', quantity: 0, available: true, variants: [] },
+      ],
+    });
+    expect(snapshot.tables.inventory.find(row => row.productId === 'unlimited-product')).toMatchObject({ inventoryMode: 'unlimited', stockStatus: 'unlimited' });
+    expect(snapshot.tables.inventory.find(row => row.productId === 'legacy-unconfigured')).toMatchObject({ inventoryMode: 'unconfigured', stockStatus: 'unconfigured' });
+    expect(snapshot.tables.inventory.find(row => row.productId === 'real-stockout')).toMatchObject({ inventoryMode: 'tracked', stockStatus: 'out_of_stock' });
   });
 });

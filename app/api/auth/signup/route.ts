@@ -4,6 +4,7 @@ import { setCustomerSession } from '@/lib/customerAuth';
 import { customerSessionConfigurationError } from '@/lib/customerJwt';
 import { connectToMongo } from '@/lib/mongoose';
 import { authRateLimit } from '@/lib/authRateLimit';
+import { logServerError } from '@/lib/apiError';
 import { validateEmail, validateFullName, validatePassword, validatePhone } from '@/lib/validators';
 import { User } from '@/models/User';
 
@@ -96,7 +97,7 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
-    console.error('[CustomerSignup] Account creation failed:', error instanceof Error ? error.message : 'unknown error');
+    logServerError({ route: 'POST /api/auth/signup', err: error, requestId: request.headers.get('x-request-id') });
     return NextResponse.json(
       { ok: false, error: 'SIGNUP_FAILED', message: 'Account creation is temporarily unavailable.' },
       { status: 500 },

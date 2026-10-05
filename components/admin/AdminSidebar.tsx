@@ -1,12 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, UtensilsCrossed, ShoppingBag,
-  Tag, Menu, X, ChevronRight, FileText, Image, Star, LogOut, MessageSquare, CircleDollarSign,
+  Tag, Menu, X, ChevronRight, FileText, Image, Star, LogOut, MessageSquare, CircleDollarSign, UsersRound,
 } from 'lucide-react';
 import { apiRequest, clearApiClientSession } from '@/lib/apiClient';
 
@@ -19,6 +19,7 @@ const NAV = [
   { href: '/admin/contacts', icon: MessageSquare,    label: 'Contacts'    },
   { href: '/admin/orders',  icon: ShoppingBag,       label: 'Orders'      },
   { href: '/admin/finance', icon: CircleDollarSign,  label: 'Costs & stock' },
+  { href: '/admin/workers', icon: UsersRound,        label: 'Counter workers' },
   { href: '/admin/coupons', icon: Tag,               label: 'Coupons'     },
 ];
 
@@ -28,6 +29,43 @@ export default function AdminSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const mobileButtonRef = useRef<HTMLButtonElement>(null);
+  const mobileDrawerRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const restoreFocusTarget = mobileButtonRef.current;
+    document.body.style.overflow = 'hidden';
+    const focusable = () => Array.from(mobileDrawerRef.current?.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ) ?? []);
+    focusable()[0]?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setMobileOpen(false);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const nodes = focusable();
+      if (!nodes.length) return;
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', onKeyDown);
+      restoreFocusTarget?.focus();
+    };
+  }, [mobileOpen]);
 
   const logout = async () => {
     if (loggingOut) return;
@@ -48,6 +86,7 @@ export default function AdminSidebar() {
       <Link
         href={href}
         onClick={() => setMobileOpen(false)}
+        aria-current={active ? 'page' : undefined}
         className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group relative ${
           active
             ? 'bg-gradient-to-r from-[#FF4500]/20 to-[#FF8C00]/10 text-white border border-[#FF4500]/25'
@@ -92,7 +131,7 @@ export default function AdminSidebar() {
       </div>
 
       {/* Nav links */}
-      <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+      <nav className="flex-1 p-3 space-y-1 overflow-y-auto" aria-label="Admin sections">
         {NAV.map(item => <NavItem key={item.href} {...item} />)}
       </nav>
 
@@ -129,10 +168,12 @@ export default function AdminSidebar() {
       >
         {/* Collapse toggle */}
         <button
+          type="button"
           onClick={() => setCollapsed(c => !c)}
           className="absolute top-5 right-3 w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10
                      border border-white/10 flex items-center justify-center transition-colors z-10"
           aria-label="Toggle sidebar"
+          aria-expanded={!collapsed}
         >
           <ChevronRight className={`w-3.5 h-3.5 text-gray-400 transition-transform ${collapsed ? '' : 'rotate-180'}`} />
         </button>
@@ -141,10 +182,14 @@ export default function AdminSidebar() {
 
       {/* Mobile Hamburger */}
       <button
+        ref={mobileButtonRef}
+        type="button"
         onClick={() => setMobileOpen(true)}
         className="lg:hidden fixed top-4 left-4 z-50 w-10 h-10 rounded-xl bg-[#0f0f0f]/90
                    border border-white/10 flex items-center justify-center backdrop-blur-lg"
         aria-label="Open menu"
+        aria-expanded={mobileOpen}
+        aria-controls="admin-mobile-navigation"
       >
         <Menu className="w-5 h-5 text-white" />
       </button>
@@ -161,6 +206,11 @@ export default function AdminSidebar() {
               className="fixed inset-0 bg-black/70 z-40 lg:hidden"
             />
             <motion.aside
+              ref={mobileDrawerRef}
+              id="admin-mobile-navigation"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Admin navigation"
               initial={{ x: '-100%' }}
               animate={{ x: 0 }}
               exit={{ x: '-100%' }}
@@ -168,8 +218,10 @@ export default function AdminSidebar() {
               className="fixed top-0 left-0 h-full w-64 bg-[#0f0f0f] border-r border-white/8 z-50 lg:hidden"
             >
               <button
+                type="button"
                 onClick={() => setMobileOpen(false)}
                 className="absolute top-4 right-4 w-8 h-8 rounded-lg bg-white/8 flex items-center justify-center"
+                aria-label="Close admin navigation"
               >
                 <X className="w-4 h-4 text-gray-400" />
               </button>

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 import { validateFullName, validatePhone } from '@/lib/validators';
+import { apiRequest } from '@/lib/apiClient';
 
 export default function ProfilePage() {
   const { customer, isLoading, error, updateProfile, logout, refreshCustomer } = useAuth();
@@ -17,6 +18,13 @@ export default function ProfilePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [googleAvailable, setGoogleAvailable] = useState(false);
+
+  useEffect(() => {
+    apiRequest<{ ok: true; available: boolean }>('/api/auth/google/status', { cache: 'no-store' })
+      .then(result => setGoogleAvailable(result.available))
+      .catch(() => setGoogleAvailable(false));
+  }, []);
 
   useEffect(() => {
     if (customer) {
@@ -297,6 +305,19 @@ export default function ProfilePage() {
 
           {/* Danger Zone */}
           <div className="pt-8 border-t border-gray-200 dark:border-gray-700">
+            <div className="mb-5 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+              <p className="font-semibold text-gray-900 dark:text-white">Google account</p>
+              <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                {customer.authProvider === 'google' || customer.googleLinked
+                  ? 'Google identity is linked to this account.'
+                  : googleAvailable
+                    ? 'Linking requires this signed-in session and Google provider verification; an email match alone is never used.'
+                    : 'Google linking is not configured. Your existing account remains available.'}
+              </p>
+              {!customer.googleLinked && customer.authProvider !== 'google' && googleAvailable && (
+                <a href="/api/auth/google/start?purpose=link&returnTo=%2Fcustomer%2Fprofile" className="mt-3 inline-flex min-h-10 items-center rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-900 dark:border-gray-600 dark:text-white">Link Google securely</a>
+              )}
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <button
                 onClick={handleLogout}
@@ -304,12 +325,12 @@ export default function ProfilePage() {
               >
                 Logout
               </button>
-              <Link
+              {customer.authProvider !== 'google' && <Link
                 href="/customer/change-password"
                 className="text-center bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 font-semibold py-2 px-4 rounded-lg transition-colors"
               >
                 Change Password
-              </Link>
+              </Link>}
             </div>
           </div>
         </div>

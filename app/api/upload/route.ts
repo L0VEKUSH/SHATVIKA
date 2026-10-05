@@ -25,7 +25,10 @@ import { MediaAsset } from '@/models/MediaAsset';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const PRIVATE_HEADERS = { 'Cache-Control': 'private, no-store, max-age=0' };
+const PRIVATE_HEADERS = {
+  'Cache-Control': 'private, no-store, max-age=0',
+  'X-Shatvika-Operation': 'media-upload',
+};
 const deleteSchema = z.object({ assetId: z.string().regex(/^[a-f\d]{24}$/i) }).strict();
 
 type UploadActor = {
@@ -36,6 +39,20 @@ type UploadActor = {
 
 function response(body: Record<string, unknown>, status: number, headers?: HeadersInit) {
   return NextResponse.json(body, { status, headers: { ...PRIVATE_HEADERS, ...headers } });
+}
+
+function storageUnavailableResponse() {
+  const config = getMediaStorageConfiguration();
+  let missing = 'MEDIA_STORAGE_PROVIDER';
+  if (config.provider === 'disabled' && config.reason === 'CLOUDINARY_CONFIGURATION_INCOMPLETE') {
+    missing = 'CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET';
+  }
+  return response({
+    ok: false,
+    error: 'UPLOAD_STORAGE_NOT_CONFIGURED',
+    message: `Durable media uploads are unavailable until object storage is configured. Missing: ${missing}`,
+    details: { missing: missing.split(', ') }
+  }, 503);
 }
 
 function canManageMedia(permissions: string[]) {
@@ -116,11 +133,7 @@ export async function POST(request: NextRequest) {
   const { actor } = authorization;
 
   if (getMediaStorageConfiguration().provider === 'disabled') {
-    return response({
-      ok: false,
-      error: 'UPLOAD_STORAGE_NOT_CONFIGURED',
-      message: 'Durable media uploads are unavailable until object storage is configured.',
-    }, 503);
+    return storageUnavailableResponse();
   }
 
   try {
@@ -180,7 +193,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     await recordAudit({ actor, action: 'media.upload', outcome: 'failure', request, metadata: { scope, reason: 'provider_failure' } });
-    if (error instanceof MediaStorageUnavailableError) return response({ ok: false, error: error.code }, 503);
+    if (error instanceof MediaStorageUnavailableError) return storageUnavailableResponse();
     logServerError({ route: 'POST /api/upload provider', err: error, requestId: request.headers.get('x-request-id') });
     return response({ ok: false, error: 'UPLOAD_PROVIDER_FAILED' }, 502);
   }
@@ -253,7 +266,7 @@ export async function DELETE(request: NextRequest) {
     } catch (error) {
       await MediaAsset.updateOne({ _id: claimed._id, status: 'deleting' }, { $set: { status: 'active' } }).catch(() => undefined);
       await recordAudit({ actor, action: 'media.delete', assetId: parsed.data.assetId, outcome: 'failure', request, metadata: { reason: 'provider_failure' } });
-      if (error instanceof MediaStorageUnavailableError) return response({ ok: false, error: error.code }, 503);
+      if (error instanceof MediaStorageUnavailableError) return storageUnavailableResponse();
       if (error instanceof MediaStorageOperationError) return response({ ok: false, error: 'DELETE_PROVIDER_FAILED' }, 502);
       throw error;
     }

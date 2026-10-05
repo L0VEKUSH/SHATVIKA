@@ -122,7 +122,7 @@ export interface ProductAnalyticsRow {
   currentStock: number | null;
   reorderPoint: number | null;
   manuallyAvailable: boolean | null;
-  stockStatus: 'in_stock' | 'low_stock' | 'out_of_stock' | 'manually_disabled' | 'unknown';
+  stockStatus: 'in_stock' | 'low_stock' | 'out_of_stock' | 'unlimited' | 'unconfigured' | 'manually_disabled' | 'unknown';
 }
 
 export interface SoldItemAnalyticsRow {
@@ -207,6 +207,7 @@ export interface OrderAnalyticsRow {
   placedAt: string;
   customerId: string;
   customerName: string;
+  customerIdentityType: 'guest' | 'google' | 'registered' | 'legacy';
   status: string;
   paymentMethod: string;
   paymentStatus: string;
@@ -284,6 +285,7 @@ export interface InventoryAnalyticsRow {
   categoryId: string;
   categoryName: string;
   quantity: number;
+  inventoryMode: 'tracked' | 'unlimited' | 'unconfigured';
   reorderPoint: number;
   manuallyAvailable: boolean;
   stockStatus: ProductAnalyticsRow['stockStatus'];

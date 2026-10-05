@@ -4,6 +4,7 @@ import { useEffect, useState, use, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 import {
   Star, ShoppingCart, Zap, Plus, Minus, ChevronLeft,
   CheckCircle, ThumbsUp, Send, Heart, Share2, LogIn, AlertCircle,
@@ -11,16 +12,19 @@ import {
 import { useCart } from '@/context/CartContext';
 import { useAuth } from '@/context/AuthContext';
 import { ApiClientError, apiRequest } from '@/lib/apiClient';
+import type { Category, MenuItem, Variant } from '@/types';
+import { availableQuantity, resolveInventoryMode } from '@/lib/inventory';
 
 /* ── Types ─────────────────────────────────────────── */
 interface VariantType { id: string; _id?: string; name: string; price: number; available: boolean; }
 interface ProductType {
-  _id: string; id?: string; name: string; description: string;
+  _id?: string; id?: string; name: string; description: string;
   ingredients?: string[]; images?: string[]; variants: VariantType[];
   basePrice?: number; rating: number; reviewCount: number;
-  category: string; emoji: string; gradientClass: string;
+  category: Category; emoji: string; gradientClass: string;
   popular?: boolean; spicy?: boolean; vegetarian?: boolean;
   available?: boolean;
+  inventoryMode?: 'tracked' | 'unlimited'; quantity?: number;
 }
 interface ReviewType {
   id: string; name: string; rating: number; text?: string;
@@ -33,10 +37,11 @@ interface ReviewType {
 /* ── Star renderer ─────────────────────────────────── */
 function Stars({ rating, size = 4 }: { rating: number; size?: number }) {
   return (
-    <div className="flex items-center gap-0.5">
+    <div className="flex items-center gap-0.5" role="img" aria-label={`${rating} out of 5 stars`}>
       {[1, 2, 3, 4, 5].map(n => (
         <Star
           key={n}
+          aria-hidden="true"
           className={`w-${size} h-${size} ${n <= Math.round(rating) ? 'fill-[#FFD700] text-[#FFD700]' : 'text-gray-700'}`}
           style={{ width: `${size * 4}px`, height: `${size * 4}px` }}
         />
@@ -130,6 +135,7 @@ function ProductReviewCard({ review, onToggleHelpful }: { review: ReviewType; on
   );
 }
 export default function ProductDetailsPage({ params }: { params: Promise<{ id: string }> }) {
+  const router = useRouter();
   const unwrappedParams = use(params);
   const { id } = unwrappedParams;
 
@@ -145,6 +151,7 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
   const [reviewError, setReviewError] = useState('');
   const [reviewSuccess, setReviewSuccess] = useState(false);
   const [added, setAdded] = useState(false);
+  const [shareStatus, setShareStatus] = useState('');
   const [relatedItems, setRelatedItems] = useState<ProductType[]>([]);
 
   const { addToCart, toggleWishlist, isInWishlist } = useCart();
@@ -204,7 +211,7 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
     } catch (err) {
       const messages: Record<string, string> = {
         UNAUTHENTICATED: 'Please sign in to submit a review.',
-        NOT_VERIFIED: 'A delivered order containing this item is required.',
+        NOT_VERIFIED: 'A fulfilled order containing this item is required.',
         DUPLICATE_REVIEW: 'You already reviewed this item.',
       };
       setReviewError(err instanceof ApiClientError ? messages[err.code] ?? err.message : err instanceof Error ? err.message : 'Failed to submit review');
@@ -230,18 +237,49 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
   const selectedVariant = product?.variants?.find(v => (v.id || (v as any)._id) === selectedVariantId);
   const currentPrice = selectedVariant?.price || product?.basePrice || 0;
   const totalPrice = currentPrice * quantity;
+  const inventoryMode = product ? resolveInventoryMode(product) : 'unconfigured';
+  const stock = product ? availableQuantity(product) : null;
+  const canOrder = Boolean(product && product.available !== false && selectedVariant?.available !== false &&
+    (inventoryMode === 'unlimited' || (inventoryMode === 'tracked' && (stock ?? 0) > 0)));
+  const quantityLimit = inventoryMode === 'tracked' ? Math.min(100, stock ?? 0) : 100;
+  const stockMessage = inventoryMode === 'unconfigured'
+    ? 'Inventory setup is required before this item can be ordered.'
+    : inventoryMode === 'tracked' && stock === 0
+      ? 'Out of stock.'
+      : inventoryMode === 'tracked' && stock != null && stock <= 5
+        ? `Only ${stock} available.`
+        : null;
 
   const handleAddToCart = useCallback(() => {
-    if (!product) return;
-    if (selectedVariant) {
-      addToCart(product as any, selectedVariant as any);
-    } else if (product.basePrice) {
-      // Create a synthetic variant for items with only basePrice
-      addToCart(product as any, { id: 'base', name: 'Regular', price: product.basePrice, available: true });
-    }
+    if (!product || !productId || !canOrder) return false;
+    const variant: Variant | null = selectedVariant ??
+      (typeof product.basePrice === 'number'
+        ? { id: 'base', name: 'Regular', price: product.basePrice, available: product.available !== false }
+        : null);
+    if (!variant) return false;
+    const cartProduct: MenuItem = { ...product, id: productId };
+    addToCart(cartProduct, variant, quantity);
     setAdded(true);
     setTimeout(() => setAdded(false), 1500);
-  }, [product, selectedVariant, addToCart]);
+    return true;
+  }, [product, productId, selectedVariant, addToCart, quantity, canOrder]);
+
+  const handleShare = useCallback(async () => {
+    setShareStatus('');
+    try {
+      if (typeof navigator.share === 'function') {
+        await navigator.share({ title: product?.name ?? 'SHATVIKA CORNER menu item', url: window.location.href });
+        setShareStatus('Shared.');
+        return;
+      }
+      if (!navigator.clipboard) throw new Error('CLIPBOARD_UNAVAILABLE');
+      await navigator.clipboard.writeText(window.location.href);
+      setShareStatus('Link copied.');
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      setShareStatus('Sharing is unavailable. Copy the address from your browser.');
+    }
+  }, [product?.name]);
 
   // Rating distribution (mock from reviews if available)
   const ratingDist = [0, 0, 0, 0, 0];
@@ -400,6 +438,8 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 mb-6">
               <div className="flex items-center bg-white/5 border border-white/10 rounded-full p-1">
                 <button
+                  type="button"
+                  aria-label="Decrease quantity"
                   onClick={() => setQuantity(q => Math.max(1, q - 1))}
                   className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
                 >
@@ -407,7 +447,10 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
                 </button>
                 <span className="w-12 text-center font-bold text-lg">{quantity}</span>
                 <button
-                  onClick={() => setQuantity(q => q + 1)}
+                  type="button"
+                  aria-label="Increase quantity"
+                  onClick={() => setQuantity(q => Math.min(quantityLimit, q + 1))}
+                  disabled={!canOrder || quantity >= quantityLimit}
                   className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
                 >
                   <Plus className="w-4 h-4" />
@@ -416,7 +459,7 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
 
               <button
                 onClick={handleAddToCart}
-                disabled={product.available === false}
+                disabled={!canOrder}
                 className={`flex-1 flex items-center justify-center gap-2 px-8 py-4 rounded-full font-bold transition-all duration-200 ${
                   added
                     ? 'bg-green-500/20 border border-green-500/40 text-green-400'
@@ -431,13 +474,15 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
               </button>
 
               <button
-                onClick={() => { handleAddToCart(); /* Navigate to checkout */ }}
-                disabled={product.available === false}
+                type="button"
+                onClick={() => { if (handleAddToCart()) router.push('/?confirmOrder=1'); }}
+                disabled={!canOrder}
                 className="flex items-center justify-center gap-2 px-6 py-4 rounded-full font-bold bg-white text-black hover:bg-gray-100 transition-colors disabled:opacity-50"
               >
                 <Zap className="w-5 h-5" /> Buy Now
               </button>
             </div>
+            {stockMessage && <p role="status" className="mb-6 text-sm font-semibold text-amber-300">{stockMessage}</p>}
 
             {/* Wishlist + Share */}
             <div className="flex items-center gap-3">
@@ -452,9 +497,10 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
                 <Heart className={`w-4 h-4 ${wishlisted ? 'fill-current' : ''}`} />
                 {wishlisted ? 'Wishlisted' : 'Add to Wishlist'}
               </button>
-              <button className="flex items-center gap-2 px-4 py-2 rounded-full border border-white/10 text-gray-400 text-sm font-medium hover:text-white hover:border-white/20 transition-all">
+              <button type="button" onClick={handleShare} className="flex items-center gap-2 px-4 py-2 rounded-full border border-white/10 text-gray-400 text-sm font-medium hover:text-white hover:border-white/20 transition-all">
                 <Share2 className="w-4 h-4" /> Share
               </button>
+              <span className="text-xs text-gray-400" role="status" aria-live="polite">{shareStatus}</span>
             </div>
           </motion.div>
         </div>
@@ -493,7 +539,7 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
               ) : !isAuthenticated ? (
                 <div className="text-center">
                   <LogIn className="w-6 h-6 text-[#FF8C00] mx-auto mb-2" />
-                  <p className="text-xs text-gray-400 mb-3">Sign in with a delivered order to review.</p>
+                  <p className="text-xs text-gray-400 mb-3">Sign in with a fulfilled order to review.</p>
                   <Link href={`/auth/login?returnTo=${encodeURIComponent(`/product/${id}`)}`} className="btn-flame inline-flex px-4 py-2 text-xs">Sign In</Link>
                 </div>
               ) : (
@@ -501,7 +547,7 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
                   <p className="text-xs text-gray-500">Reviewing as {customer?.fullName}</p>
                   <div className="flex gap-1">
                     {[1, 2, 3, 4, 5].map(n => (
-                      <button key={n} onClick={() => setReviewRating(n)}>
+                      <button key={n} type="button" aria-label={`Rate ${n} out of 5`} aria-pressed={reviewRating === n} onClick={() => setReviewRating(n)}>
                         <Star className={`w-5 h-5 ${n <= reviewRating ? 'fill-[#FFD700] text-[#FFD700]' : 'text-gray-700'}`} />
                       </button>
                     ))}
@@ -533,7 +579,7 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
                 <div className="glass rounded-2xl p-10 border border-white/8 text-center">
                   <span className="text-4xl mb-3 block">💬</span>
                   <h3 className="text-lg font-black text-white mb-2">No reviews yet</h3>
-                  <p className="text-gray-400 text-sm">Be the first to review this product after your order is delivered.</p>
+                  <p className="text-gray-400 text-sm">Be the first to review this product after your order is fulfilled.</p>
                 </div>
               )}
             </div>

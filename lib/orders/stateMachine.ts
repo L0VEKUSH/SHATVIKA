@@ -11,7 +11,7 @@ export const ORDER_STATUSES = [
 ] as const;
 
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
-export type OrderActorType = 'customer' | 'admin' | 'worker' | 'system';
+export type OrderActorType = 'customer' | 'guest' | 'admin' | 'worker' | 'system';
 
 const TRANSITIONS: Record<OrderStatus, readonly OrderStatus[]> = {
   placed: ['accepted', 'cancelled'],
@@ -31,7 +31,7 @@ export function isOrderStatus(value: unknown): value is OrderStatus {
 
 export function allowedOrderTransitions(status: OrderStatus, actor: OrderActorType): readonly OrderStatus[] {
   const allowed = TRANSITIONS[status];
-  if (actor === 'customer') {
+  if (actor === 'customer' || actor === 'guest') {
     return allowed.filter((next) => next === 'cancelled' && ['placed', 'pending', 'accepted'].includes(status));
   }
   return allowed;

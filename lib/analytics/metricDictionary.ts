@@ -39,10 +39,11 @@ export const METRIC_DICTIONARY: MetricDefinition[] = [
   {
     id: 'net_merchandise_sales',
     label: 'Net merchandise sales',
-    formula: 'Fulfilled order subtotal minus order discount.',
+      formula: 'Fulfilled order subtotal minus order discount and the merchandise portion of successful refunds.',
     includedStatuses: 'served (counter) and delivered (legacy delivery).',
     timestampBasis: 'Order createdAt for the selected order cohort.',
-    refundTreatment: 'Refunds are separate because legacy data has no line-level allocation.',
+      refundTreatment: 'Successful refunds reduce only their own order merchandise, capped after discount; refunded tax/delivery remains in the separate refund metric.',
+      limitation: 'Unavailable when explicit refund tracking is absent.',
   },
   {
     id: 'collected_payments',
@@ -114,11 +115,11 @@ export const METRIC_DICTIONARY: MetricDefinition[] = [
   {
     id: 'gross_margin',
     label: 'Gross margin',
-    formula: 'Net merchandise sales for cost-covered lines minus their immutable order-time costs.',
+      formula: 'Post-refund net merchandise sales for cost-covered lines minus their immutable order-time costs.',
     includedStatuses: 'served counter and delivered legacy orders.',
     timestampBasis: 'Order createdAt for the selected order cohort.',
-    refundTreatment: 'Refunds require allocation before an actual post-refund margin can be stated.',
-    limitation: 'Reported only at 100% order-time cost coverage; otherwise Cost data required.',
+      refundTreatment: 'Successful refunds reduce their order merchandise before margin; tax/delivery refund amounts are not misclassified as merchandise.',
+      limitation: 'Reported only at 100% order-time cost coverage and with explicit refund tracking; otherwise required data is identified.',
   },
   {
     id: 'tax_collected', label: 'Tax on fulfilled sales',

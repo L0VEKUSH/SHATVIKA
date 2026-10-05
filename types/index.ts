@@ -30,6 +30,7 @@ export interface MenuItem {
   isNew?: boolean;
   isNewItem?: boolean;
   available?: boolean;
+  inventoryMode?: 'tracked' | 'unlimited';
   quantity?: number;
   quantitySold?: number;
   reorderPoint?: number;
@@ -57,6 +58,8 @@ export interface CartItem {
   variantName: string;
   variantPrice: number;
   quantity: number;
+  inventoryMode?: 'tracked' | 'unlimited';
+  availableQuantity?: number | null;
 
   // UI fields
   emoji: string;

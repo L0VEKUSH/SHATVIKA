@@ -8,7 +8,7 @@ const inventoryEventSchema = new Schema({
   quantity: { type: Number, required: true, min: 1, validate: Number.isSafeInteger },
   quantityDelta: { type: Number, required: true, validate: Number.isSafeInteger },
   reason: { type: String, required: true, trim: true, maxlength: 300 },
-  actorType: { type: String, enum: ['customer', 'worker', 'admin', 'system'], required: true },
+  actorType: { type: String, enum: ['customer', 'guest', 'worker', 'admin', 'system'], required: true },
   actorId: { type: String, default: null, maxlength: 64 },
   occurredAt: { type: Date, default: Date.now, required: true, index: true },
 }, { timestamps: true });

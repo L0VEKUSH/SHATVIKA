@@ -2,17 +2,19 @@ import mongoose from 'mongoose';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getAdminSessionState } from '@/lib/adminJwt';
+import { logServerError } from '@/lib/apiError';
 import { connectToMongo } from '@/lib/mongoose';
 import { OrderServiceError, recordCounterPayment, transitionOrder } from '@/lib/orders/service';
 import { ORDER_STATUSES } from '@/lib/orders/stateMachine';
 import { Order } from '@/models/Order';
+import { operationalReasonSchema, validationErrorResponse } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 
 const updateSchema = z.object({
   orderStatus: z.enum(ORDER_STATUSES).optional(),
   expectedVersion: z.number().int().nonnegative().optional(),
-  reason: z.string().trim().min(3).max(300).optional(),
+  reason: operationalReasonSchema.optional(),
   note: z.string().trim().max(500).optional(),
   adminNotes: z.string().trim().max(1000).nullable().optional(),
   paymentAction: z.enum(['collect', 'refund']).optional(),
@@ -21,7 +23,7 @@ const updateSchema = z.object({
   transactionReference: z.string().trim().min(3).max(160).optional(),
   merchantReceiptVerified: z.boolean().optional(),
   allowUnpaidServeException: z.boolean().optional(),
-  unpaidServeExceptionReason: z.string().trim().min(3).max(300).optional(),
+  unpaidServeExceptionReason: operationalReasonSchema.optional(),
 }).strict().superRefine((value, context) => {
   const actions = Number(Boolean(value.orderStatus)) + Number(value.adminNotes !== undefined) + Number(Boolean(value.paymentAction));
   if (actions !== 1) context.addIssue({ code: 'custom', message: 'Submit exactly one update action' });
@@ -71,7 +73,7 @@ export async function PUT(
     }
     const parsed = updateSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
-      return NextResponse.json({ ok: false, error: 'VALIDATION_FAILED', details: parsed.error.flatten() }, { status: 400 });
+      return validationErrorResponse(parsed.error, 'Check the order update fields and try again.');
     }
 
     if (parsed.data.orderStatus) {
@@ -131,7 +133,7 @@ export async function PUT(
     if (error instanceof OrderServiceError) {
       return NextResponse.json({ ok: false, error: error.code, details: error.details }, { status: error.status });
     }
-    console.error('[PUT /api/orders/:id]', error instanceof Error ? error.message : 'Unknown error');
+    logServerError({ route: 'PUT /api/orders/:id', err: error, requestId: request.headers.get('x-request-id') });
     return NextResponse.json({ ok: false, error: 'ORDER_UPDATE_FAILED' }, { status: 500 });
   }
 }

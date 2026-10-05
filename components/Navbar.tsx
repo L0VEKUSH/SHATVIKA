@@ -20,6 +20,7 @@ const NAV_LINKS = [
   { href: '#about',   label: 'About'   },
   { href: '#reviews', label: 'Reviews' },
   { href: '#contact', label: 'Contact' },
+  { href: '/orders',  label: 'My orders' },
 ];
 
 export default function Navbar({ onCartOpen, darkMode, onDarkModeToggle }: NavbarProps) {
@@ -28,6 +29,8 @@ export default function Navbar({ onCartOpen, darkMode, onDarkModeToggle }: Navba
   const [searchOpen,     setSearchOpen]      = useState(false);
   const [searchQuery,    setSearchQuery]     = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
+  const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const mobileDialogRef = useRef<HTMLDivElement>(null);
   const { totalItems, wishlistCount } = useCart();
 
   /* ── scroll listener ─────────────────────────────── */
@@ -47,6 +50,41 @@ export default function Navbar({ onCartOpen, darkMode, onDarkModeToggle }: Navba
     window.dispatchEvent(new CustomEvent('menu-search', { detail: searchQuery }));
   }, [searchQuery]);
 
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const restoreFocusTarget = mobileMenuButtonRef.current;
+    document.body.style.overflow = 'hidden';
+    const focusable = () => Array.from(mobileDialogRef.current?.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ) ?? []);
+    focusable()[0]?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setMobileOpen(false);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const nodes = focusable();
+      if (!nodes.length) return;
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', onKeyDown);
+      restoreFocusTarget?.focus();
+    };
+  }, [mobileOpen]);
+
   const scrollTo = (id: string) => {
     setMobileOpen(false);
     document.querySelector(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -54,16 +92,23 @@ export default function Navbar({ onCartOpen, darkMode, onDarkModeToggle }: Navba
 
   /* ── Icon button helper ───────────────────────────── */
   const IconBtn = ({
-    onClick, label, children, badge,
+    onClick, label, children, badge, buttonRef, expanded, controls,
   }: {
     onClick?: () => void;
     label: string;
     children: React.ReactNode;
     badge?: number;
+    buttonRef?: React.RefObject<HTMLButtonElement>;
+    expanded?: boolean;
+    controls?: string;
   }) => (
     <button
+      ref={buttonRef}
+      type="button"
       onClick={onClick}
       aria-label={label}
+      aria-expanded={expanded}
+      aria-controls={controls}
       className="relative w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 border border-white/10
                  flex items-center justify-center transition-colors duration-200"
     >
@@ -87,7 +132,7 @@ export default function Navbar({ onCartOpen, darkMode, onDarkModeToggle }: Navba
   return (
     <>
       {/* ─── Main Nav ─────────────────────────────────── */}
-      <motion.nav
+      <motion.header
         initial={{ y: -80 }}
         animate={{ y: 0 }}
         transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
@@ -122,7 +167,11 @@ export default function Navbar({ onCartOpen, darkMode, onDarkModeToggle }: Navba
               <a
                 key={link.href}
                 href={link.href}
-                onClick={e => { e.preventDefault(); scrollTo(link.href); }}
+                onClick={e => {
+                  if (!link.href.startsWith('#')) return;
+                  e.preventDefault();
+                  scrollTo(link.href);
+                }}
                 className="relative text-sm font-medium text-gray-400 hover:text-white
                            transition-colors duration-200 group"
               >
@@ -148,6 +197,8 @@ export default function Navbar({ onCartOpen, darkMode, onDarkModeToggle }: Navba
                     className="overflow-hidden"
                   >
                     <input
+                      id="menu-search"
+                      aria-label="Search the menu"
                       ref={searchRef}
                       type="search"
                       value={searchQuery}
@@ -188,7 +239,13 @@ export default function Navbar({ onCartOpen, darkMode, onDarkModeToggle }: Navba
 
             {/* Hamburger – mobile only */}
             <div className="md:hidden">
-              <IconBtn label="Toggle mobile menu" onClick={() => setMobileOpen(v => !v)}>
+              <IconBtn
+                label={mobileOpen ? 'Close mobile menu' : 'Open mobile menu'}
+                onClick={() => setMobileOpen(v => !v)}
+                buttonRef={mobileMenuButtonRef}
+                expanded={mobileOpen}
+                controls="mobile-navigation-dialog"
+              >
                 {mobileOpen
                   ? <X className="w-4 h-4 text-white" />
                   : <Menu className="w-4 h-4 text-gray-400" />
@@ -197,12 +254,17 @@ export default function Navbar({ onCartOpen, darkMode, onDarkModeToggle }: Navba
             </div>
           </div>
         </div>
-      </motion.nav>
+      </motion.header>
 
       {/* ─── Mobile Menu Overlay ───────────────────────── */}
       <AnimatePresence>
         {mobileOpen && (
           <motion.div
+            ref={mobileDialogRef}
+            id="mobile-navigation-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Mobile navigation"
             initial={{ opacity: 0, x: '100%' }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: '100%' }}
@@ -229,7 +291,11 @@ export default function Navbar({ onCartOpen, darkMode, onDarkModeToggle }: Navba
                 initial={{ opacity: 0, y: 24 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.07 }}
-                onClick={e => { e.preventDefault(); scrollTo(link.href); }}
+                onClick={e => {
+                  if (!link.href.startsWith('#')) return;
+                  e.preventDefault();
+                  scrollTo(link.href);
+                }}
                 className="text-2xl font-semibold text-gray-300 hover:text-white
                            transition-colors duration-200 tracking-wide"
               >

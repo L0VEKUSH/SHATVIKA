@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { logServerError } from '@/lib/apiError';
+import { logServerError, publicApiErrorMessage } from '@/lib/apiError';
 import { BusinessRulesConfigurationError } from '@/lib/businessRules';
 import { getCustomerSessionState } from '@/lib/customerJwt';
 import { enforceCustomerMutationRateLimit } from '@/lib/customerRouteAuth';
@@ -32,7 +32,12 @@ async function customer() {
 
 function quoteFailure(error: unknown, request: NextRequest) {
   if (error instanceof CartQuoteError) {
-    return NextResponse.json({ ok: false, error: error.code, details: error.details }, { status: error.status });
+    return NextResponse.json({
+      ok: false,
+      error: error.code,
+      message: publicApiErrorMessage(error.code, error.details),
+      details: error.details,
+    }, { status: error.status });
   }
   if (error instanceof BusinessRulesConfigurationError) {
     return NextResponse.json({ ok: false, error: 'CHECKOUT_NOT_CONFIGURED', details: { missing: error.missing } }, { status: 503 });

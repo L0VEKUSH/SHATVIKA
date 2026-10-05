@@ -19,6 +19,10 @@ import { PaymentEvent } from '@/models/PaymentEvent';
 import { Review } from '@/models/Review';
 import { User } from '@/models/User';
 import { TokenCounter } from '@/models/TokenCounter';
+import { GuestSession } from '@/models/GuestSession';
+import { hashGuestSessionToken } from '@/lib/guestSession';
+import { GET as getCustomerOrder } from '@/app/api/user/orders/[id]/route';
+import { NextRequest } from 'next/server';
 
 let replicaSet: MongoMemoryReplSet;
 
@@ -96,6 +100,7 @@ beforeAll(async () => {
     TokenCounter.syncIndexes(),
     InventoryEvent.syncIndexes(),
     Review.syncIndexes(),
+    GuestSession.syncIndexes(),
   ]);
 }, 300_000);
 
@@ -112,6 +117,7 @@ beforeEach(async () => {
     TokenCounter.deleteMany({}),
     InventoryEvent.deleteMany({}),
     Review.deleteMany({}),
+    GuestSession.deleteMany({}),
   ]);
 });
 
@@ -123,6 +129,36 @@ afterAll(async () => {
 });
 
 describe('transactional commerce persistence on MongoDB replica set', () => {
+  it('creates one persistent unpaid guest order and denies another browser access by order ID or token knowledge', async () => {
+    const product = await createBaseProduct();
+    const ownerToken = 'owner-browser-token-that-is-long-and-random-enough-0001';
+    const otherToken = 'other-browser-token-that-is-long-and-random-enough-0002';
+    const [owner] = await Promise.all([
+      GuestSession.create({ tokenHash: hashGuestSessionToken(ownerToken), expiresAt: new Date(Date.now() + 86_400_000), lastSeenAt: new Date() }),
+      GuestSession.create({ tokenHash: hashGuestSessionToken(otherToken), expiresAt: new Date(Date.now() + 86_400_000), lastSeenAt: new Date() }),
+    ]);
+
+    const first = await createCustomerOrder({
+      guestSessionId: String(owner._id), identityType: 'guest', input: checkoutInput(null, product), idempotencyKey: 'guest-checkout-retry-0001',
+    });
+    const retry = await createCustomerOrder({
+      guestSessionId: String(owner._id), identityType: 'guest', input: checkoutInput(null, product), idempotencyKey: 'guest-checkout-retry-0001',
+    });
+    expect(retry).toMatchObject({ orderId: first.orderId, tokenNumber: first.tokenNumber, duplicate: true, paymentStatus: 'pending' });
+    expect(await Order.countDocuments({ guestSessionId: owner._id })).toBe(1);
+
+    const ownedResponse = await getCustomerOrder(
+      new NextRequest(`http://localhost/api/user/orders/${first.orderId}`, { headers: { cookie: `shatvika_guest=${ownerToken}` } }),
+      { params: Promise.resolve({ id: first.orderId }) },
+    );
+    expect(ownedResponse.status).toBe(200);
+    const deniedResponse = await getCustomerOrder(
+      new NextRequest(`http://localhost/api/user/orders/${first.orderId}`, { headers: { cookie: `shatvika_guest=${otherToken}` } }),
+      { params: Promise.resolve({ id: first.orderId }) },
+    );
+    expect(deniedResponse.status).toBe(404);
+  });
+
   it('runs Mongoose 9 save/update middleware and persists authoritative snapshots', async () => {
     const user = await createUser('persistence@example.test');
     expect(user.addresses[0].isDefault).toBe(true);
@@ -180,7 +216,7 @@ describe('transactional commerce persistence on MongoDB replica set', () => {
       fulfillmentType: 'counter',
       tokenBusinessDate: '2026-06-15',
       tokenSequence: 1,
-      tokenNumber: 'SC-0001',
+      tokenNumber: '001',
       inventoryState: 'committed',
       customerSnapshot: { name: 'Isolated Test Customer', email: 'persistence@example.test' },
     });
@@ -254,9 +290,43 @@ describe('transactional commerce persistence on MongoDB replica set', () => {
 
     expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
     const rejected = results.find(result => result.status === 'rejected') as PromiseRejectedResult;
-    expect(rejected.reason).toMatchObject({ code: 'INSUFFICIENT_STOCK', status: 409 });
+    expect(rejected.reason).toMatchObject({ code: 'INSUFFICIENT_STOCK', status: 409, details: { available: 0, requested: 1 } });
     expect(await Order.countDocuments()).toBe(1);
     expect((await MenuItem.findById(product._id).lean())?.quantity).toBe(0);
+  });
+
+  it('requires an explicit decision for ambiguous legacy inventory and supports unlimited items', async () => {
+    const user = await createUser('inventory-mode@example.test');
+    const legacy = await createBaseProduct({ name: 'Legacy inventory ambiguity', quantity: 2 });
+    await MenuItem.collection.updateOne(
+      { _id: legacy._id },
+      { $unset: { inventoryMode: '', quantity: '' } },
+    );
+    await expect(createCustomerOrder({
+      userId: String(user._id),
+      input: checkoutInput(user, legacy),
+      idempotencyKey: 'legacy-inventory-unconfigured',
+    })).rejects.toMatchObject({ code: 'INVENTORY_NOT_CONFIGURED', status: 409 });
+    expect(await Order.countDocuments()).toBe(0);
+
+    const unlimited = await createBaseProduct({ name: 'Made to order unlimited', quantity: 0 });
+    await MenuItem.updateOne({ _id: unlimited._id }, { $set: { inventoryMode: 'unlimited' } });
+    const placed = await createCustomerOrder({
+      userId: String(user._id),
+      input: checkoutInput(user, unlimited),
+      idempotencyKey: 'unlimited-inventory-order',
+    });
+    expect(await MenuItem.findById(unlimited._id).lean()).toMatchObject({ quantity: 0, quantitySold: 1 });
+    expect((await Order.findById(placed.orderId).lean())?.items[0]).toMatchObject({ inventoryMode: 'unlimited' });
+    await transitionOrder({
+      orderId: placed.orderId,
+      nextStatus: 'cancelled',
+      actor: { type: 'customer', id: String(user._id) },
+      expectedVersion: 0,
+      reason: 'Changed my mind',
+    });
+    expect(await MenuItem.findById(unlimited._id).lean()).toMatchObject({ quantity: 0, quantitySold: 0 });
+    expect(await InventoryEvent.countDocuments({ orderId: placed.orderId })).toBe(0);
   });
 
   it('allocates unique daily location tokens atomically and resets only at the business-date boundary', async () => {
@@ -271,7 +341,7 @@ describe('transactional commerce persistence on MongoDB replica set', () => {
     })));
     expect(new Set(placed.map(order => order.orderId)).size).toBe(6);
     expect(placed.map(order => order.tokenNumber).sort()).toEqual([
-      'SC-0001', 'SC-0002', 'SC-0003', 'SC-0004', 'SC-0005', 'SC-0006',
+      '001', '002', '003', '004', '005', '006',
     ]);
     expect(new Set(placed.map(order => order.tokenBusinessDate))).toEqual(new Set(['2026-06-15']));
 
@@ -282,7 +352,7 @@ describe('transactional commerce persistence on MongoDB replica set', () => {
       idempotencyKey: 'next-day-token-1',
       now: new Date('2026-06-15T18:30:00.000Z'), // 00:00:00 next day in Asia/Kolkata
     });
-    expect(nextDay).toMatchObject({ tokenBusinessDate: '2026-06-16', tokenNumber: 'SC-0001' });
+    expect(nextDay).toMatchObject({ tokenBusinessDate: '2026-06-16', tokenNumber: '001' });
     expect(await TokenCounter.countDocuments({ locationId: 'test-counter' })).toBe(2);
   });
 
@@ -515,6 +585,56 @@ describe('transactional commerce persistence on MongoDB replica set', () => {
       actorId: adminId, idempotencyKey: 'paid-cancel-refund',
     });
     expect(refunded.order).toMatchObject({ paymentStatus: 'refunded', refundDuePaise: 0 });
+  });
+
+  it('updates ownerless legacy orders without retroactively requiring modern owner or address snapshots', async () => {
+    const legacyId = new mongoose.Types.ObjectId();
+    await Order.collection.insertOne({
+      _id: legacyId,
+      items: [{
+        menuItemId: new mongoose.Types.ObjectId(),
+        name: 'Historical item',
+        quantity: 1,
+        unitPrice: 75,
+        totalPrice: 75,
+      }],
+      subtotal: 75,
+      discount: 0,
+      tax: 0,
+      deliveryCharge: 0,
+      totalAmount: 75,
+      paymentMethod: 'cash',
+      paymentStatus: 'pending',
+      orderStatus: 'pending',
+      stateVersion: 0,
+      statusHistory: [],
+      inventoryState: 'unknown',
+      createdAt: new Date('2025-01-01T12:00:00.000Z'),
+      updatedAt: new Date('2025-01-01T12:00:00.000Z'),
+    } as any);
+
+    const accepted = await transitionOrder({
+      orderId: String(legacyId),
+      nextStatus: 'accepted',
+      actor: { type: 'admin', id: new mongoose.Types.ObjectId().toString() },
+      expectedVersion: 0,
+      now: new Date('2025-01-01T12:05:00.000Z'),
+    });
+    expect(accepted).toMatchObject({ orderStatus: 'accepted', stateVersion: 1 });
+    expect(accepted.userId).toBeNull();
+    expect(accepted.guestSessionId).toBeNull();
+    expect(accepted.deliveryAddress).toBeNull();
+
+    await expect(Order.create({
+      fulfillmentType: 'counter',
+      items: [{ menuItemId: new mongoose.Types.ObjectId(), name: 'Invalid new order', quantity: 1, unitPrice: 10, totalPrice: 10 }],
+      subtotal: 10,
+      discount: 0,
+      tax: 0,
+      deliveryCharge: 0,
+      totalAmount: 10,
+      paymentMethod: 'counter',
+    })).rejects.toMatchObject({ name: 'ValidationError' });
   });
 
   it('executes the explicitly enabled Mongoose 9 review update pipeline', async () => {

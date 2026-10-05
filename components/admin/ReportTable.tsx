@@ -73,6 +73,7 @@ const DATASET_COLUMNS = {
   inventory: [
     { key: 'productName', label: 'Product' },
     { key: 'categoryName', label: 'Category' },
+    { key: 'inventoryMode', label: 'Inventory mode', kind: 'status' },
     { key: 'quantity', label: 'Quantity', kind: 'integer' },
     { key: 'reorderPoint', label: 'Reorder point', kind: 'integer' },
     { key: 'manuallyAvailable', label: 'Enabled', kind: 'boolean' },

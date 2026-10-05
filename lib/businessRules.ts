@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { assertPaise, percentageOfPaise } from '@/lib/money';
+import { getCounterLocationConfiguration } from '@/lib/locations';
 
 export interface BusinessRules {
   taxRateBasisPoints: number;
@@ -65,12 +66,6 @@ export function getBusinessRules(source: Record<string, string | undefined> = pr
   };
 }
 
-function safeIdentifier(value: string | undefined, fallback: string): string {
-  const normalized = value?.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return normalized && normalized.length <= 64 ? normalized : fallback;
-}
-
 export function getFulfillmentCapabilities(
   source: Record<string, string | undefined> = process.env,
 ): FulfillmentCapabilities {
@@ -83,13 +78,14 @@ export function getFulfillmentCapabilities(
   const tokenPrefix = (source.COUNTER_TOKEN_PREFIX?.trim().toUpperCase() || 'SC')
     .replace(/[^A-Z0-9]/g, '')
     .slice(0, 8) || 'SC';
+  const { location } = getCounterLocationConfiguration(source);
   return {
     counterCollectionEnabled: true,
     // This release intentionally has no delivery-capable server path. The flag is
     // returned explicitly so clients cannot mistake missing configuration for availability.
     deliveryEnabled: false,
-    locationId: safeIdentifier(source.COUNTER_LOCATION_ID, 'shatvika-corner'),
-    locationName: source.COUNTER_LOCATION_NAME?.trim().slice(0, 120) || 'Shatvika Corner',
+    locationId: location.id,
+    locationName: location.name,
     tokenPrefix,
     timeZone,
   };

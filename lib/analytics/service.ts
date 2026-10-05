@@ -9,6 +9,7 @@ import { MenuItem } from '@/models/MenuItem';
 import { Order } from '@/models/Order';
 import { Review } from '@/models/Review';
 import { User } from '@/models/User';
+import { resolveInventoryMode, type ResolvedInventoryMode } from '@/lib/inventory';
 import {
   type AnalyticsSnapshot,
   type CouponAnalyticsRow,
@@ -77,6 +78,8 @@ interface NormalizedOrder {
   fulfillmentType: 'counter' | 'delivery';
   fulfillmentLocation: string;
   userId: string;
+  guestSessionId: string;
+  customerIdentityType: 'guest' | 'google' | 'registered' | 'legacy';
   customerName: string;
   customerEmail: string;
   customerPhone: string;
@@ -116,6 +119,7 @@ interface NormalizedProduct {
   categoryId: string;
   categoryName: string;
   quantity: number;
+  inventoryMode: ResolvedInventoryMode;
   reorderPoint: number;
   available: boolean;
   variants: Array<{ id: string; name: string }>;
@@ -256,6 +260,7 @@ function normalizeProduct(raw: PlainRecord): NormalizedProduct {
     categoryId,
     categoryName,
     quantity: Math.max(0, integer(raw.quantity)),
+    inventoryMode: resolveInventoryMode({ inventoryMode: raw.inventoryMode, quantity: raw.quantity }),
     reorderPoint: Math.max(0, integer(raw.reorderPoint, 5)),
     available: raw.available !== false,
     variants: array(raw.variants).map(value => {
@@ -271,7 +276,13 @@ function normalizeOrder(
 ): NormalizedOrder | null {
   const createdAt = date(raw.createdAt);
   if (!createdAt) return null;
-  const userId = id(raw.userId);
+  const userId = id(raw.userId) || id(raw.claimedByUserId);
+  const guestSessionId = id(raw.guestSessionId);
+  const customerIdentityType = raw.customerIdentityType === 'guest'
+    || raw.customerIdentityType === 'google'
+    || raw.customerIdentityType === 'registered'
+    ? raw.customerIdentityType
+    : 'legacy';
   const currentUser = users.get(userId) ?? {};
   const customerSnapshot = record(raw.customerSnapshot);
   const deliveryAddress = record(raw.deliveryAddress);
@@ -331,7 +342,9 @@ function normalizeOrder(
     fulfillmentType: raw.fulfillmentType === 'counter' ? 'counter' : 'delivery',
     fulfillmentLocation: text(raw.fulfillmentLocationName, raw.fulfillmentType === 'counter' ? 'Shatvika Corner' : 'Legacy delivery'),
     userId,
-    customerName: text(customerSnapshot.name, text(currentUser.fullName, 'Unknown customer')),
+    guestSessionId,
+    customerIdentityType,
+    customerName: text(customerSnapshot.name, text(currentUser.fullName, customerIdentityType === 'guest' ? 'Guest' : 'Unknown customer')),
     customerEmail: text(customerSnapshot.email, text(currentUser.email)),
     customerPhone: text(customerSnapshot.phone, text(currentUser.phone ?? deliveryAddress.phone)),
     customerWasSnapshotted: Boolean(customerSnapshot.name || customerSnapshot.email || customerSnapshot.phone),
@@ -390,6 +403,8 @@ function isRefund(payment: NormalizedPayment) {
 
 function stockStatus(product: NormalizedProduct): ProductAnalyticsRow['stockStatus'] {
   if (!product.available) return 'manually_disabled';
+  if (product.inventoryMode === 'unlimited') return 'unlimited';
+  if (product.inventoryMode === 'unconfigured') return 'unconfigured';
   if (product.quantity === 0) return 'out_of_stock';
   if (product.quantity <= product.reorderPoint) return 'low_stock';
   return 'in_stock';
@@ -681,22 +696,12 @@ export function computeAnalyticsSnapshot(input: ServiceInput): AnalyticsSnapshot
   const costCoveredValue = deliveredLines.filter(item => item.unitCostPaise != null).reduce((sum, item) => sum + item.totalPricePaise, 0);
   const costCoveragePct = deliveredLineValue === 0 ? 100 : clampPercent(costCoveredValue / deliveredLineValue * 100);
   const knownCosts = deliveredLines.reduce((sum, item) => sum + (item.unitCostPaise == null ? 0 : item.unitCostPaise * item.quantity), 0);
-  const actualGrossMargin = deliveredLineValue === 0
-    ? 0
-    : costCoveragePct === 100
-      ? currentFinancials.merchandise - currentFinancials.discount - knownCosts
-      : null;
 
   const previousDeliveredLines = previousFinancials.delivered.flatMap(order => order.items);
   const previousLineValue = previousDeliveredLines.reduce((sum, item) => sum + item.totalPricePaise, 0);
   const previousCoveredValue = previousDeliveredLines.filter(item => item.unitCostPaise != null).reduce((sum, item) => sum + item.totalPricePaise, 0);
   const previousCoverage = previousLineValue ? clampPercent(previousCoveredValue / previousLineValue * 100) : 100;
   const previousKnownCosts = previousDeliveredLines.reduce((sum, item) => sum + (item.unitCostPaise == null ? 0 : item.unitCostPaise * item.quantity), 0);
-  const previousGrossMargin = previousLineValue === 0
-    ? 0
-    : previousCoverage === 100
-      ? previousFinancials.merchandise - previousFinancials.discount - previousKnownCosts
-      : null;
 
   const hasExplicitPaymentTotals = allOrders.some(order => order.explicitCollectedPaise != null || order.explicitRefundedPaise != null);
   const paymentMode: AnalyticsSnapshot['dataQuality']['paymentTracking'] = input.paymentCollectionExists
@@ -731,6 +736,38 @@ export function computeAnalyticsSnapshot(input: ServiceInput): AnalyticsSnapshot
     entries.push(payment);
     paymentsByOrder.set(payment.orderId, entries);
   }
+  const orderMerchandiseRefundAdjustment = (order: NormalizedOrder): number | null => {
+    if (paymentMode === 'unavailable') return null;
+    const netMerchandisePaise = Math.max(0, order.subtotalPaise - order.discountPaise);
+    const refundPaise = paymentMode === 'events'
+      ? (paymentsByOrder.get(order.id) ?? []).filter(isRefund).reduce((sum, payment) => sum + payment.amountPaise, 0)
+      : order.explicitRefundedPaise ?? 0;
+    // A payment refund can include tax or legacy delivery charges. Only the
+    // merchandise portion may reduce merchandise sales/profit for this order.
+    return Math.min(netMerchandisePaise, refundPaise);
+  };
+  const recognizedNetMerchandise = (orders: NormalizedOrder[]): number | null => {
+    if (!orders.length) return 0;
+    let total = 0;
+    for (const order of orders) {
+      const refundAdjustment = orderMerchandiseRefundAdjustment(order);
+      if (refundAdjustment == null) return null;
+      total += Math.max(0, order.subtotalPaise - order.discountPaise - refundAdjustment);
+    }
+    return total;
+  };
+  const currentRecognizedNetMerchandise = recognizedNetMerchandise(currentFinancials.delivered);
+  const previousRecognizedNetMerchandise = recognizedNetMerchandise(previousFinancials.delivered);
+  const actualGrossMargin = deliveredLineValue === 0
+    ? 0
+    : costCoveragePct === 100 && currentRecognizedNetMerchandise != null
+      ? currentRecognizedNetMerchandise - knownCosts
+      : null;
+  const previousGrossMargin = previousLineValue === 0
+    ? 0
+    : previousCoverage === 100 && previousRecognizedNetMerchandise != null
+      ? previousRecognizedNetMerchandise - previousKnownCosts
+      : null;
   const outstandingEligible = current.filter(order => order.status !== 'cancelled');
   const paymentCoverageCount = paymentMode === 'events'
     ? outstandingEligible.length
@@ -746,9 +783,10 @@ export function computeAnalyticsSnapshot(input: ServiceInput): AnalyticsSnapshot
     const discounts = allocateOrderDiscount(order);
     const netWeights = order.items.map((item, index) => Math.max(0, item.totalPricePaise - (discounts[index] ?? 0)));
     const events = paymentsByOrder.get(order.id) ?? [];
-    const orderRefunded = paymentMode === 'events'
+    const rawOrderRefunded = paymentMode === 'events'
       ? events.filter(isRefund).reduce((sum, payment) => sum + payment.amountPaise, 0)
       : order.explicitRefundedPaise ?? 0;
+    const orderRefunded = Math.min(netWeights.reduce((sum, value) => sum + value, 0), rawOrderRefunded);
     const refundAllocations = allocateIntegerByWeights(orderRefunded, netWeights);
     return order.items.map((item, index): SoldItemAnalyticsRow => {
       const allocatedDiscountPaise = discounts[index] ?? 0;
@@ -799,6 +837,7 @@ export function computeAnalyticsSnapshot(input: ServiceInput): AnalyticsSnapshot
     categoryId: product.categoryId,
     categoryName: product.categoryName,
     quantity: product.quantity,
+    inventoryMode: product.inventoryMode,
     reorderPoint: product.reorderPoint,
     manuallyAvailable: product.available,
     stockStatus: stockStatus(product),
@@ -857,9 +896,6 @@ export function computeAnalyticsSnapshot(input: ServiceInput): AnalyticsSnapshot
     const coveredItems = deliveredLines.filter(item => item.productId === row.productId && item.variantId === row.variantId && item.unitCostPaise != null);
     const coveredValue = coveredItems.reduce((sum, item) => sum + item.totalPricePaise, 0);
     row.costCoveragePct = row.merchandiseSalesPaise ? clampPercent(coveredValue / row.merchandiseSalesPaise * 100) : 0;
-    row.grossMarginPaise = row.merchandiseSalesPaise > 0 && row.costCoveragePct === 100
-      ? row.merchandiseSalesPaise - row.allocatedDiscountPaise - (row.knownCostPaise ?? 0)
-      : null;
     if (row.knownCostPaise === 0 && row.costCoveragePct === 0) row.knownCostPaise = null;
   }
   for (const order of current.filter(order => order.status === 'cancelled')) {
@@ -871,6 +907,11 @@ export function computeAnalyticsSnapshot(input: ServiceInput): AnalyticsSnapshot
   for (const item of soldItemRows) {
     const row = productAggregates.get(`${item.productId}::${item.variantId}`);
     if (row) row.refundAdjustmentPaise += item.refundAdjustmentPaise;
+  }
+  for (const row of productAggregates.values()) {
+    row.grossMarginPaise = row.merchandiseSalesPaise > 0 && row.costCoveragePct === 100
+      ? row.merchandiseSalesPaise - row.allocatedDiscountPaise - row.refundAdjustmentPaise - (row.knownCostPaise ?? 0)
+      : null;
   }
   const productRows = [...productAggregates.values()].sort((a, b) => b.merchandiseSalesPaise - a.merchandiseSalesPaise || a.productName.localeCompare(b.productName));
 
@@ -926,7 +967,10 @@ export function computeAnalyticsSnapshot(input: ServiceInput): AnalyticsSnapshot
       orderCount: orders.length,
       deliveredOrders: delivered.length,
       lifetimeDeliveredOrders: lifetime?.count ?? delivered.length,
-      merchandiseSalesPaise: delivered.reduce((sum, order) => sum + order.subtotalPaise - order.discountPaise, 0),
+      merchandiseSalesPaise: delivered.reduce((sum, order) => {
+        const refundAdjustment = orderMerchandiseRefundAdjustment(order);
+        return sum + Math.max(0, order.subtotalPaise - order.discountPaise - (refundAdjustment ?? 0));
+      }, 0),
       firstOrderAt: lifetime?.firstOrderAt?.toISOString() ?? delivered[0]?.createdAt.toISOString() ?? null,
       segment: input.priorCustomerIds.has(customerId) ? 'returning' : 'new',
       email: representative.customerEmail || undefined,
@@ -1093,6 +1137,10 @@ export function computeAnalyticsSnapshot(input: ServiceInput): AnalyticsSnapshot
     ? clampPercent(operationsEligible.filter(row => row.totalFulfilmentMinutes != null).length / operationsEligible.length * 100)
     : 100;
   const limitations: string[] = [];
+  const guestBrowserSessions = new Set(current.filter(order => order.customerIdentityType === 'guest').map(order => order.guestSessionId).filter(Boolean));
+  if (guestBrowserSessions.size > 0) {
+    limitations.push(`${guestBrowserSessions.size} anonymous browser session${guestBrowserSessions.size === 1 ? '' : 's'} placed orders in this period; guest sessions are excluded from account-based unique, new, returning, and repeat-customer metrics.`);
+  }
   const lineReconciliationMismatchCount = currentFinancials.delivered.filter(order =>
     order.items.reduce((sum, item) => sum + item.totalPricePaise, 0) !== order.subtotalPaise,
   ).length;
@@ -1125,6 +1173,7 @@ export function computeAnalyticsSnapshot(input: ServiceInput): AnalyticsSnapshot
       placedAt: order.createdAt.toISOString(),
       customerId: order.userId,
       customerName: order.customerName,
+      customerIdentityType: order.customerIdentityType,
       status: order.status,
       paymentMethod: order.paymentMethod,
       paymentStatus: order.paymentStatus,
@@ -1262,13 +1311,15 @@ export function computeAnalyticsSnapshot(input: ServiceInput): AnalyticsSnapshot
       deliveredOrders: metric(currentFinancials.delivered.length, previousFinancials.delivered.length, 'count', 'delivered_orders'),
       cancelledOrders: metric(current.filter(order => order.status === 'cancelled').length, previous.filter(order => order.status === 'cancelled').length, 'count', 'cancelled_orders'),
       merchandiseSales: metric(currentFinancials.merchandise, previousFinancials.merchandise, 'paise', 'merchandise_sales'),
-      netMerchandiseSales: metric(currentFinancials.merchandise - currentFinancials.discount, previousFinancials.merchandise - previousFinancials.discount, 'paise', 'net_merchandise_sales'),
+      netMerchandiseSales: metric(currentRecognizedNetMerchandise, previousRecognizedNetMerchandise, 'paise', 'net_merchandise_sales', {
+        note: currentRecognizedNetMerchandise == null ? 'Refund data required' : undefined,
+      }),
       collectedPayments: metric(currentCollected, previousCollected, 'paise', 'collected_payments'),
       outstandingPayments: metric(outstanding, null, 'paise', 'outstanding_payments', { coveragePct: outstandingEligible.length ? clampPercent(paymentCoverageCount / outstandingEligible.length * 100) : 100 }),
       refunds: metric(currentRefunded, previousRefunded, 'paise', 'refunds'),
       averageOrderValue: metric(
-        currentFinancials.delivered.length ? Math.round((currentFinancials.merchandise - currentFinancials.discount) / currentFinancials.delivered.length) : null,
-        previousFinancials.delivered.length ? Math.round((previousFinancials.merchandise - previousFinancials.discount) / previousFinancials.delivered.length) : null,
+        currentFinancials.delivered.length && currentRecognizedNetMerchandise != null ? Math.round(currentRecognizedNetMerchandise / currentFinancials.delivered.length) : null,
+        previousFinancials.delivered.length && previousRecognizedNetMerchandise != null ? Math.round(previousRecognizedNetMerchandise / previousFinancials.delivered.length) : null,
         'paise', 'average_order_value',
       ),
       uniqueCustomers: metric(deliveredCustomerIds.size, previousDeliveredCustomerIds.size, 'count', 'unique_customers'),
@@ -1277,7 +1328,9 @@ export function computeAnalyticsSnapshot(input: ServiceInput): AnalyticsSnapshot
       inventoryAlerts: metric(inventoryAlerts.length, null, 'count', 'inventory_alerts'),
       grossMargin: metric(actualGrossMargin, previousGrossMargin, 'paise', 'gross_margin', {
         coveragePct: costCoveragePct,
-        note: actualGrossMargin == null ? 'Cost data required' : undefined,
+        note: actualGrossMargin == null
+          ? costCoveragePct < 100 ? 'Cost data required' : 'Refund data required'
+          : undefined,
       }),
       taxCollected: metric(currentFinancials.tax, previousFinancials.tax, 'paise', 'tax_collected'),
       unitsSold: metric(unitsSold, previousUnitsSold, 'items', 'units_sold'),
@@ -1289,7 +1342,10 @@ export function computeAnalyticsSnapshot(input: ServiceInput): AnalyticsSnapshot
         coveragePct: expenseCompletenessPct, note: expenseCompletenessConfirmed ? 'Expense completeness confirmed' : 'Recorded expenses only; period not confirmed complete',
       }),
       recordedNetProfit: metric(recordedNetProfit, previousRecordedNetProfit, 'paise', 'recorded_net_profit', {
-        coveragePct: costCoveragePct, note: recordedNetProfit == null ? 'Cost data required' : 'Uses recorded operating expenses; completeness may be unconfirmed',
+        coveragePct: costCoveragePct,
+        note: recordedNetProfit == null
+          ? costCoveragePct < 100 ? 'Cost data required' : 'Refund data required'
+          : 'Uses recorded operating expenses; completeness may be unconfirmed',
       }),
       finalizedNetProfit: metric(finalizedNetProfit, previousFinalizedNetProfit, 'paise', 'finalized_net_profit', {
         coveragePct: Math.min(costCoveragePct, expenseCompletenessPct), note: finalizedNetProfit == null ? 'Complete cost data and confirmed expense months required' : 'Cost and expense completeness confirmed',
@@ -1373,7 +1429,8 @@ export function computeAnalyticsSnapshot(input: ServiceInput): AnalyticsSnapshot
 
 function queryProjection() {
   return {
-    userId: 1, items: 1, subtotal: 1, discount: 1, tax: 1, deliveryCharge: 1, totalAmount: 1,
+    userId: 1, guestSessionId: 1, claimedByUserId: 1, customerIdentityType: 1,
+    items: 1, subtotal: 1, discount: 1, tax: 1, deliveryCharge: 1, totalAmount: 1,
     subtotalPaise: 1, discountPaise: 1, taxPaise: 1, deliveryChargePaise: 1, totalPaise: 1,
     collectedPaise: 1, refundedPaise: 1, paymentMethod: 1, paymentStatus: 1, orderStatus: 1,
     couponCode: 1, couponSnapshot: 1, customerSnapshot: 1, deliveryAddress: 1, createdAt: 1,
@@ -1415,7 +1472,7 @@ export async function getAnalyticsSnapshot(filters: ResolvedAnalyticsFilters): P
     createdAt: { $lt: filters.asOfUtc },
   }).select(queryProjection()).sort({ createdAt: -1 }).limit(MAX_SUPPORTING_ROWS + 1).lean();
   const productsPromise = MenuItem.find({ archivedAt: null }).select({
-    name: 1, category: 1, categoryId: 1, quantity: 1, reorderPoint: 1, available: 1, variants: 1,
+    name: 1, category: 1, categoryId: 1, inventoryMode: 1, quantity: 1, reorderPoint: 1, available: 1, variants: 1,
   }).sort({ name: 1 }).limit(5_001).lean();
   const reviewsPromise = Review.find({
     $or: [
@@ -1469,27 +1526,29 @@ export async function getAnalyticsSnapshot(filters: ResolvedAnalyticsFilters): P
   const analyticsOrders = [...rawOrders, ...additionalPaymentOrders];
   if (analyticsOrders.length > MAX_ANALYTICS_ORDERS) throw new AnalyticsDataLimitError('ORDER_DATA_LIMIT_EXCEEDED');
 
-  const orderUserIds = [...new Set([...analyticsOrders, ...rawActiveOrders].map(raw => id(raw.userId)).filter(Boolean))];
+  const orderUserIds = [...new Set([...analyticsOrders, ...rawActiveOrders].map(raw => id(raw.userId) || id(raw.claimedByUserId)).filter(Boolean))];
   const validUserIds = orderUserIds.filter(value => mongoose.Types.ObjectId.isValid(value)).map(value => new mongoose.Types.ObjectId(value));
   const rawUsers = validUserIds.length
     ? await User.find({ _id: { $in: validUserIds } }).select({ fullName: 1, email: 1, phone: 1 }).limit(MAX_SUPPORTING_ROWS).lean() as unknown as PlainRecord[]
     : [];
-  const [priorIds, priorComparisonIds, lifetime] = await Promise.all([
+  const effectiveCustomerPipeline = (before: Date, includeCount: boolean) => [
+    { $match: { $or: [{ userId: { $in: validUserIds } }, { claimedByUserId: { $in: validUserIds } }], orderStatus: { $in: ['delivered', 'served'] }, createdAt: { $lt: before } } },
+    { $project: { effectiveUserId: { $ifNull: ['$userId', '$claimedByUserId'] }, createdAt: 1 } },
+    { $group: { _id: '$effectiveUserId', ...(includeCount ? { count: { $sum: 1 }, firstOrderAt: { $min: '$createdAt' } } : {}) } },
+  ];
+  const [priorRows, priorComparisonRows, lifetime] = await Promise.all([
     validUserIds.length
-      ? Order.distinct('userId', { userId: { $in: validUserIds }, orderStatus: { $in: ['delivered', 'served'] }, createdAt: { $lt: filters.fromUtc } })
+      ? Order.aggregate(effectiveCustomerPipeline(filters.fromUtc, false)).option({ maxTimeMS: 10_000 })
       : Promise.resolve([]),
     validUserIds.length
-      ? Order.distinct('userId', { userId: { $in: validUserIds }, orderStatus: { $in: ['delivered', 'served'] }, createdAt: { $lt: filters.comparisonFromUtc } })
+      ? Order.aggregate(effectiveCustomerPipeline(filters.comparisonFromUtc, false)).option({ maxTimeMS: 10_000 })
       : Promise.resolve([]),
     validUserIds.length
-      ? Order.aggregate([
-          { $match: { userId: { $in: validUserIds }, orderStatus: { $in: ['delivered', 'served'] }, createdAt: { $lt: filters.asOfUtc } } },
-          { $group: { _id: '$userId', count: { $sum: 1 }, firstOrderAt: { $min: '$createdAt' } } },
-        ]).option({ maxTimeMS: 10_000 })
+      ? Order.aggregate(effectiveCustomerPipeline(filters.asOfUtc, true)).option({ maxTimeMS: 10_000 })
       : Promise.resolve([]),
   ]);
-  const priorCustomerIds = new Set(priorIds.map(value => id(value)));
-  const priorComparisonCustomerIds = new Set(priorComparisonIds.map(value => id(value)));
+  const priorCustomerIds = new Set((priorRows as PlainRecord[]).map(value => id(value._id)));
+  const priorComparisonCustomerIds = new Set((priorComparisonRows as PlainRecord[]).map(value => id(value._id)));
   const lifetimeCustomers = new Map<string, { count: number; firstOrderAt: Date | null }>(
     (lifetime as PlainRecord[]).map(row => [id(row._id), { count: integer(row.count), firstOrderAt: date(row.firstOrderAt) }]),
   );

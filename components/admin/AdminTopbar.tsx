@@ -10,7 +10,9 @@ const PAGE_TITLES: Record<string, { title: string; sub: string }> = {
   '/admin/menu': { title: 'Menu manager', sub: 'Manage products, variants, pricing, and availability' },
   '/admin/gallery': { title: 'Gallery', sub: 'Manage approved durable media' },
   '/admin/reviews': { title: 'Review moderation', sub: 'Review and moderate customer feedback' },
+  '/admin/contacts': { title: 'Contact follow-up', sub: 'Track and respond to customer enquiries' },
   '/admin/orders': { title: 'Order tracker', sub: 'Review orders and apply valid status transitions' },
+  '/admin/finance': { title: 'Costs and stock', sub: 'Maintain auditable costs, expenses, and inventory events' },
   '/admin/coupons': { title: 'Coupons', sub: 'Manage promotion rules and usage limits' },
 };
 

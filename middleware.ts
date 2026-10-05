@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server';
 import { verifyAdminToken } from '@/lib/adminJwtEdge';
 import { verifyCustomerToken } from '@/lib/customerJwtEdge';
 import { verifyWorkerToken } from '@/lib/workerJwtEdge';
+import { WORKER_COOKIE_NAME } from '@/lib/workerSessionConfig';
 import {
   CSRF_COOKIE_NAME,
   CSRF_HEADER_NAME,
@@ -13,8 +14,13 @@ import { safeReturnPath } from '@/lib/returnPath';
 
 const PUBLIC_ADMIN_PATHS = ['/admin/login', '/admin/signup', '/admin/api/login', '/admin/api/signup'];
 const PUBLIC_AUTH_PATHS = ['/auth/login', '/auth/signup', '/auth/forgot-password', '/auth/reset-password'];
-const PUBLIC_COUNTER_PATHS = ['/counter/login', '/counter/api/login'];
-const PROTECTED_CUSTOMER_PATHS = ['/customer', '/profile', '/orders', '/checkout', '/addresses'];
+const PUBLIC_COUNTER_PATHS = new Set([
+  '/counter/login',
+  '/counter/api/login',
+  '/counter/api/logout',
+  '/counter/logout',
+]);
+const PROTECTED_CUSTOMER_PATHS = ['/customer', '/profile', '/checkout', '/addresses'];
 const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 function matchesPath(pathname: string, paths: readonly string[]) {
@@ -27,7 +33,8 @@ function requiresCsrf(pathname: string, method: string) {
     pathname.startsWith('/admin/api/') ||
     pathname.startsWith('/counter/api/') ||
     pathname === '/admin/logout' ||
-    pathname === '/counter/logout'
+    pathname === '/counter/logout' ||
+    pathname === '/counter/api/logout'
   );
 }
 
@@ -78,7 +85,7 @@ async function hasValidCustomerSession(request: NextRequest) {
 }
 
 async function hasValidWorkerSession(request: NextRequest) {
-  const token = request.cookies.get('worker_session')?.value;
+  const token = request.cookies.get(WORKER_COOKIE_NAME)?.value;
   return token ? verifyWorkerToken(token) : false;
 }
 
@@ -134,7 +141,7 @@ export async function middleware(request: NextRequest) {
 
   if (pathname.startsWith('/counter')) {
     const authenticated = await hasValidWorkerSession(request);
-    if (matchesPath(pathname, PUBLIC_COUNTER_PATHS)) {
+    if (PUBLIC_COUNTER_PATHS.has(pathname)) {
       if (authenticated && pathname === '/counter/login') {
         return securityHeaders(NextResponse.redirect(new URL('/counter', request.url)), requestId);
       }
@@ -168,5 +175,7 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/api/:path*', '/admin/:path*', '/counter/:path*', '/auth/:path*', '/customer/:path*', '/profile', '/orders', '/checkout', '/addresses'],
+  // Apply response hardening to public pages as well as authenticated/API routes.
+  // Next.js build assets are excluded because they are immutable framework files.
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 };

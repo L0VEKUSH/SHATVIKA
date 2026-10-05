@@ -2,9 +2,24 @@ import { describe, expect, it } from 'vitest';
 import { createCsrfToken, isTrustedMutationOrigin, verifyCsrfToken } from '@/lib/csrf';
 import { safeReturnPath } from '@/lib/returnPath';
 import { signSessionToken, verifySessionToken } from '@/lib/sessionToken';
+import { workerSessionConfigurationIssue } from '@/lib/workerSessionConfig';
+import { ApiClientError } from '@/lib/apiClient';
 
 const SECRET = 'test-only-secret-that-is-longer-than-thirty-two-bytes';
 const ACCOUNT_ID = '507f1f77bcf86cd799439011';
+
+describe('client-safe API errors', () => {
+  it('keeps machine codes available without displaying raw internal codes by default', () => {
+    const internal = new ApiClientError(500, { error: 'MongoServerError' });
+    expect(internal.code).toBe('MongoServerError');
+    expect(internal.message).toBe('The request could not be completed.');
+
+    expect(new ApiClientError(403, { error: 'WORKER_LOCATION_MISMATCH' }).message)
+      .toContain('different counter');
+    expect(new ApiClientError(409, { error: 'INSUFFICIENT_STOCK' }).message)
+      .toContain('no longer available');
+  });
+});
 
 describe('signed session claims', () => {
   it('accepts the intended role and rejects tampering or a different role', async () => {
@@ -49,6 +64,23 @@ describe('signed session claims', () => {
     });
     await expect(verifySessionToken({ token, role: 'admin', secret: SECRET, nowSeconds: 2_091 }))
       .resolves.toBeNull();
+  });
+});
+
+describe('worker session configuration', () => {
+  it('requires a distinct worker-only secret containing at least 32 bytes', () => {
+    expect(workerSessionConfigurationIssue({})).toBe('missing');
+    expect(workerSessionConfigurationIssue({ WORKER_JWT_SECRET: 'too-short' })).toBe('too_short');
+    expect(workerSessionConfigurationIssue({
+      WORKER_JWT_SECRET: SECRET,
+      ADMIN_JWT_SECRET: SECRET,
+      CUSTOMER_JWT_SECRET: 'another-independent-customer-secret-over-32-bytes',
+    })).toBe('not_independent');
+    expect(workerSessionConfigurationIssue({
+      WORKER_JWT_SECRET: SECRET,
+      ADMIN_JWT_SECRET: 'independent-admin-secret-that-is-over-thirty-two-bytes',
+      CUSTOMER_JWT_SECRET: 'another-independent-customer-secret-over-32-bytes',
+    })).toBeNull();
   });
 });
 

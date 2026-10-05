@@ -14,16 +14,51 @@ export class ApiClientError extends Error {
   readonly code: string;
   readonly details?: unknown;
   readonly retryAfter?: number;
+  readonly requestUrl?: string;
+  readonly requestMethod?: string;
+  readonly requestId?: string;
+  readonly operation?: string;
 
-  constructor(status: number, payload: ErrorPayload | null) {
+  constructor(status: number, payload: ErrorPayload | null, context: {
+    requestUrl?: string;
+    requestMethod?: string;
+    requestId?: string | null;
+    operation?: string | null;
+  } = {}) {
     const code = payload?.error || `HTTP_${status}`;
-    super(payload?.message || (typeof payload?.error === 'string' ? payload.error : 'Request failed'));
+    super(payload?.message || defaultErrorMessage(code, status));
     this.name = 'ApiClientError';
     this.status = status;
     this.code = code;
     this.details = payload?.details;
     this.retryAfter = payload?.retryAfter;
+    this.requestUrl = context.requestUrl;
+    this.requestMethod = context.requestMethod;
+    this.requestId = context.requestId ?? undefined;
+    this.operation = context.operation ?? undefined;
   }
+}
+
+function defaultErrorMessage(code: string, status: number): string {
+  const known: Record<string, string> = {
+    WORKER_LOCATION_MISMATCH: 'This worker is assigned to a different counter. Ask an administrator to update the assignment.',
+    INSUFFICIENT_STOCK: 'The requested quantity is no longer available.',
+    INVENTORY_NOT_CONFIGURED: 'This item cannot be ordered until its inventory is configured.',
+    VALIDATION_FAILED: 'Check the submitted fields and try again.',
+    STALE_ORDER_VERSION: 'This record changed elsewhere. Refresh and try again.',
+    INVALID_ORDER_TRANSITION: 'That status change is not allowed.',
+    RATE_LIMITED: 'Too many requests. Wait briefly and try again.',
+    TOO_MANY_REQUESTS: 'Too many requests. Wait briefly and try again.',
+  };
+  if (known[code]) return known[code];
+  if (status === 401) return 'Your session is missing or has expired. Sign in and try again.';
+  if (status === 403) return 'You do not have permission to perform this action.';
+  if (status === 404) return 'The requested record was not found.';
+  if (status === 409) return 'The request conflicts with the latest saved state. Refresh and try again.';
+  if (status === 400 || status === 422) return 'Check the submitted information and try again.';
+  if (status === 429) return 'Too many requests. Wait briefly and try again.';
+  if (status === 503) return 'This service is temporarily unavailable. Try again shortly.';
+  return 'The request could not be completed.';
 }
 
 export type ApiRequestOptions = Omit<RequestInit, 'body'> & {
@@ -88,7 +123,12 @@ async function csrfToken(force = false): Promise<string> {
     });
     const payload = await parseResponse(response) as CsrfResponse | ErrorPayload | null;
     if (!response.ok || !payload || !('csrfToken' in payload) || typeof payload.csrfToken !== 'string') {
-      throw new ApiClientError(response.status, payload as ErrorPayload | null);
+      throw new ApiClientError(response.status, payload as ErrorPayload | null, {
+        requestUrl: '/api/csrf',
+        requestMethod: 'GET',
+        requestId: response.headers.get('x-request-id'),
+        operation: response.headers.get('x-shatvika-operation'),
+      });
     }
     csrfState = { token: payload.csrfToken, expiresAt: payload.expiresAt };
     announce('csrf', csrfState);
@@ -147,7 +187,12 @@ export async function apiRequest<T>(url: string, options: ApiRequestOptions = {}
   const payload = await parseResponse(response);
   if (!response.ok) {
     if (response.status === 401 && !options.suppressSessionExpiry) clearApiClientSession();
-    throw new ApiClientError(response.status, payload as ErrorPayload | null);
+    throw new ApiClientError(response.status, payload as ErrorPayload | null, {
+      requestUrl: url,
+      requestMethod: (options.method ?? 'GET').toUpperCase(),
+      requestId: response.headers.get('x-request-id'),
+      operation: response.headers.get('x-shatvika-operation'),
+    });
   }
   return payload as T;
 }

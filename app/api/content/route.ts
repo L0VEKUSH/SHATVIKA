@@ -2,6 +2,7 @@ import mongoose, { type Model } from 'mongoose';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getAdminSessionState } from '@/lib/adminJwt';
+import { logServerError } from '@/lib/apiError';
 import { connectToMongo } from '@/lib/mongoose';
 import { Feature, GalleryItem, Stat, TeamMember } from '@/models/Content';
 
@@ -101,7 +102,7 @@ export async function GET(request: NextRequest) {
       headers: { 'Cache-Control': 'public, max-age=30, stale-while-revalidate=60' },
     });
   } catch (error) {
-    console.error('[GET /api/content]', error instanceof Error ? error.message : 'Unknown error');
+    logServerError({ route: 'GET /api/content', err: error, requestId: request.headers.get('x-request-id') });
     return NextResponse.json({ ok: false, error: 'CONTENT_UNAVAILABLE' }, { status: 503 });
   }
 }
@@ -119,7 +120,7 @@ export async function POST(request: NextRequest) {
     const created = await models[type].create(parsed.data);
     return NextResponse.json(serialize(created), { status: 201 });
   } catch (error) {
-    console.error('[POST /api/content]', error instanceof Error ? error.message : 'Unknown error');
+    logServerError({ route: 'POST /api/content', err: error, requestId: request.headers.get('x-request-id') });
     return NextResponse.json({ ok: false, error: 'CONTENT_CREATE_FAILED' }, { status: 500 });
   }
 }
@@ -151,7 +152,7 @@ export async function PUT(request: NextRequest) {
     if (!updated) return NextResponse.json({ ok: false, error: 'CONTENT_NOT_FOUND' }, { status: 404 });
     return NextResponse.json(serialize(updated));
   } catch (error) {
-    console.error('[PUT /api/content]', error instanceof Error ? error.message : 'Unknown error');
+    logServerError({ route: 'PUT /api/content', err: error, requestId: request.headers.get('x-request-id') });
     return NextResponse.json({ ok: false, error: 'CONTENT_UPDATE_FAILED' }, { status: 500 });
   }
 }
@@ -170,7 +171,7 @@ export async function DELETE(request: NextRequest) {
     if (!deleted) return NextResponse.json({ ok: false, error: 'CONTENT_NOT_FOUND' }, { status: 404 });
     return NextResponse.json({ ok: true, id });
   } catch (error) {
-    console.error('[DELETE /api/content]', error instanceof Error ? error.message : 'Unknown error');
+    logServerError({ route: 'DELETE /api/content', err: error, requestId: request.headers.get('x-request-id') });
     return NextResponse.json({ ok: false, error: 'CONTENT_DELETE_FAILED' }, { status: 500 });
   }
 }

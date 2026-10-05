@@ -1,30 +1,24 @@
 import { cookies } from 'next/headers';
 import { connectToMongo } from '@/lib/mongoose';
 import { signSessionToken, verifySessionToken, type SessionClaims } from '@/lib/sessionToken';
+import {
+  getWorkerSessionSecret,
+  WORKER_COOKIE_NAME,
+  WORKER_SESSION_SECONDS,
+  workerSessionConfigurationError,
+} from '@/lib/workerSessionConfig';
 import { Worker } from '@/models/Worker';
+import { configuredCounterLocation } from '@/lib/locations';
 
-export const WORKER_COOKIE_NAME = 'worker_session';
-const WORKER_SESSION_SECONDS = 12 * 60 * 60;
+export { WORKER_COOKIE_NAME, workerSessionConfigurationError } from '@/lib/workerSessionConfig';
 
 export type WorkerSessionState =
   | { status: 'valid'; accountId: string; claims: SessionClaims; name: string; locationId: string; permissions: string[] }
   | { status: 'invalid' | 'account_disabled' | 'database_unavailable' };
 
-function secret() {
-  return process.env.WORKER_JWT_SECRET ?? '';
-}
-
-export function workerSessionConfigurationError(): string | null {
-  const value = secret();
-  if (!value) return 'WORKER_JWT_SECRET is not configured';
-  if (process.env.NODE_ENV === 'production' && new TextEncoder().encode(value).byteLength < 32) {
-    return 'WORKER_JWT_SECRET must contain at least 32 bytes in production';
-  }
-  return null;
-}
-
 export async function verifyWorkerTokenState(token: string): Promise<WorkerSessionState> {
-  const claims = await verifySessionToken({ token, role: 'worker', secret: secret() });
+  if (workerSessionConfigurationError()) return { status: 'invalid' };
+  const claims = await verifySessionToken({ token, role: 'worker', secret: getWorkerSessionSecret() });
   if (!claims) return { status: 'invalid' };
   try {
     await connectToMongo();
@@ -34,10 +28,14 @@ export async function verifyWorkerTokenState(token: string): Promise<WorkerSessi
     if (!worker || worker.role !== 'worker') return { status: 'invalid' };
     if (!worker.isActive) return { status: 'account_disabled' };
     if (!Number.isSafeInteger(worker.passwordVersion) || worker.passwordVersion !== claims.sv) return { status: 'invalid' };
+    const permissions = Array.isArray(worker.permissions) ? worker.permissions.map(String) : [];
+    if (!permissions.includes('counter:operate')) return { status: 'invalid' };
+    const location = configuredCounterLocation(worker.locationId);
+    if (!location) return { status: 'invalid' };
     return {
       status: 'valid', accountId: claims.sub, claims,
-      name: worker.name, locationId: worker.locationId,
-      permissions: worker.permissions.map(String),
+      name: worker.name, locationId: location.id,
+      permissions,
     };
   } catch {
     return { status: 'database_unavailable' };
@@ -53,7 +51,7 @@ export async function getWorkerSessionState(): Promise<WorkerSessionState> {
 export async function setWorkerSession(workerId: string, passwordVersion = 0) {
   const token = await signSessionToken({
     accountId: workerId, role: 'worker', sessionVersion: passwordVersion,
-    lifetimeSeconds: WORKER_SESSION_SECONDS, secret: secret(),
+    lifetimeSeconds: WORKER_SESSION_SECONDS, secret: getWorkerSessionSecret(),
   });
   const store = await cookies();
   store.set(WORKER_COOKIE_NAME, token, {

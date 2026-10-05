@@ -36,6 +36,6 @@ export async function allocateOrderToken(session: ClientSession, at: Date) {
     locationName: capabilities.locationName,
     businessDate,
     sequence: counter.sequence,
-    tokenNumber: `${capabilities.tokenPrefix}-${String(counter.sequence).padStart(4, '0')}`,
+    tokenNumber: String(counter.sequence).padStart(3, '0'),
   };
 }

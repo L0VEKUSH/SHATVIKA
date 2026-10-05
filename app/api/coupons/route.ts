@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getAdminSessionState } from '@/lib/adminJwt';
+import { logServerError } from '@/lib/apiError';
 import { connectToMongo } from '@/lib/mongoose';
 import { Coupon } from '@/models/Coupon';
 
@@ -55,7 +56,7 @@ export async function GET(request: NextRequest) {
       { headers: { 'Cache-Control': adminRequested ? 'private, no-store' : 'public, max-age=30' } },
     );
   } catch (error) {
-    console.error('[GET /api/coupons]', error instanceof Error ? error.message : 'Unknown error');
+    logServerError({ route: 'GET /api/coupons', err: error, requestId: request.headers.get('x-request-id') });
     return NextResponse.json({ ok: false, error: 'COUPONS_UNAVAILABLE' }, { status: 503 });
   }
 }
@@ -82,7 +83,7 @@ export async function POST(request: NextRequest) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 11000) {
       return NextResponse.json({ ok: false, error: 'COUPON_CODE_EXISTS' }, { status: 409 });
     }
-    console.error('[POST /api/coupons]', error instanceof Error ? error.message : 'Unknown error');
+    logServerError({ route: 'POST /api/coupons', err: error, requestId: request.headers.get('x-request-id') });
     return NextResponse.json({ ok: false, error: 'COUPON_CREATE_FAILED' }, { status: 500 });
   }
 }
