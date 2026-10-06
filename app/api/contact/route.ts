@@ -1,10 +1,10 @@
 import mongoose from 'mongoose';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import DOMPurify from 'isomorphic-dompurify';
 import { connectToMongo } from '@/lib/mongoose';
 import { logServerError } from '@/lib/apiError';
 import { distributedRateLimit, getClientIp } from '@/lib/rateLimit';
+import { toPlainText } from '@/lib/plainText';
 import { ADMIN_COOKIE_NAME, verifyAdminTokenState, type AdminSessionState } from '@/lib/adminJwt';
 import { AuditEvent } from '@/models/AuditEvent';
 import { ContactMessage } from '@/models/ContactMessage';
@@ -41,10 +41,6 @@ async function adminSession(request: NextRequest): Promise<AdminSessionState> {
 
 function canManageContacts(admin: ValidAdmin): boolean {
   return admin.permissions.includes('*') || admin.permissions.includes('contacts:manage');
-}
-
-function sanitize(input: string): string {
-  return DOMPurify.sanitize(input, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] }).trim();
 }
 
 function json(body: Record<string, unknown>, status = 200, headers?: Record<string, string>) {
@@ -158,8 +154,8 @@ export async function POST(request: NextRequest) {
 
   if (parsed.data.website) return json({ ok: false, error: 'SPAM' }, 400);
 
-  const cleanName = sanitize(parsed.data.name);
-  const cleanMessage = sanitize(parsed.data.message);
+  const cleanName = toPlainText(parsed.data.name);
+  const cleanMessage = toPlainText(parsed.data.message);
   if (cleanName.length < 2 || cleanMessage.length < 10) {
     return json({ ok: false, error: 'VALIDATION_FAILED' }, 400);
   }
@@ -169,7 +165,7 @@ export async function POST(request: NextRequest) {
     await ContactMessage.create({
       name: cleanName,
       email: parsed.data.email,
-      phone: sanitize(parsed.data.phone),
+      phone: toPlainText(parsed.data.phone),
       subject: parsed.data.subject,
       message: cleanMessage,
       status: 'new',
@@ -196,7 +192,7 @@ export async function PATCH(request: NextRequest) {
   try {
     const limited = await distributedRateLimit(`contact-admin-update:${state.accountId}`, 30, 60);
     if (!limited.allowed) return json({ ok: false, error: 'RATE_LIMITED', retryAfter: limited.retryAfter }, 429, { 'Retry-After': String(limited.retryAfter) });
-    const adminNote = parsed.data.adminNote ? sanitize(parsed.data.adminNote) : null;
+    const adminNote = parsed.data.adminNote ? toPlainText(parsed.data.adminNote) : null;
     const handled = parsed.data.status !== 'new';
     const updated = await ContactMessage.findOneAndUpdate(
       { _id: new mongoose.Types.ObjectId(parsed.data.id) },

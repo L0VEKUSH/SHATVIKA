@@ -1,11 +1,11 @@
 import mongoose from 'mongoose';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import DOMPurify from 'isomorphic-dompurify';
 import { ADMIN_COOKIE_NAME, verifyAdminTokenState, type AdminSessionState } from '@/lib/adminJwt';
 import { CUSTOMER_COOKIE_NAME, verifyCustomerTokenState, type CustomerSessionState } from '@/lib/customerJwt';
 import { logServerError } from '@/lib/apiError';
 import { connectToMongo } from '@/lib/mongoose';
+import { toPlainText } from '@/lib/plainText';
 import { distributedRateLimit, getClientIp } from '@/lib/rateLimit';
 import { reviewOrderEligibilityFilter } from '@/lib/reviews/eligibility';
 import { AuditEvent } from '@/models/AuditEvent';
@@ -55,10 +55,6 @@ async function adminSession(request: NextRequest): Promise<AdminSessionState> {
 
 function canModerate(admin: ValidAdmin) {
   return admin.permissions.includes('*') || admin.permissions.includes('reviews:moderate');
-}
-
-function sanitizeText(value: string) {
-  return DOMPurify.sanitize(value, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] }).trim();
 }
 
 function reviewResponse(row: any, includePrivate: boolean) {
@@ -154,7 +150,7 @@ export async function POST(request: NextRequest) {
     const parsed = submitSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) return NextResponse.json({ ok: false, error: 'VALIDATION_FAILED', details: parsed.error.flatten() }, { status: 400 });
     if (parsed.data.website) return NextResponse.json({ ok: false, error: 'SPAM' }, { status: 400 });
-    const text = sanitizeText(parsed.data.text ?? '');
+    const text = toPlainText(parsed.data.text ?? '');
     if (!parsed.data.menuItemId && text.length < 10) return NextResponse.json({ ok: false, error: 'TEXT_TOO_SHORT', details: { min: 10 } }, { status: 400 });
     if (parsed.data.menuItemId && text.length > 500) return NextResponse.json({ ok: false, error: 'TEXT_TOO_LONG', details: { max: 500 } }, { status: 400 });
     const user = await User.findById(state.accountId).select('fullName email isActive').lean();
@@ -244,7 +240,7 @@ export async function PATCH(request: NextRequest) {
   const update: Record<string, unknown> = {};
   if (parsed.data.status) update.status = parsed.data.status;
   if (parsed.data.replyText !== undefined) {
-    update.replyText = parsed.data.replyText ? sanitizeText(parsed.data.replyText) : null;
+    update.replyText = parsed.data.replyText ? toPlainText(parsed.data.replyText) : null;
     update.replyDate = parsed.data.replyText ? new Date() : null;
     update.replyBy = parsed.data.replyText ? state.accountId : null;
   }
