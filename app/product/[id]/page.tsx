@@ -140,7 +140,9 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
   const { id } = unwrappedParams;
 
   const [product, setProduct] = useState<ProductType | null>(null);
+  const [productError, setProductError] = useState<ApiClientError | null>(null);
   const [reviews, setReviews] = useState<ReviewType[]>([]);
+  const [reviewsError, setReviewsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [quantity, setQuantity] = useState(1);
   const [selectedVariantId, setSelectedVariantId] = useState('');
@@ -153,13 +155,20 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
   const [added, setAdded] = useState(false);
   const [shareStatus, setShareStatus] = useState('');
   const [relatedItems, setRelatedItems] = useState<ProductType[]>([]);
+  const [relatedError, setRelatedError] = useState<string | null>(null);
 
   const { addToCart, toggleWishlist, isInWishlist } = useCart();
   const { isAuthenticated, customer } = useAuth();
 
   const loadReviews = useCallback(async (productId: string) => {
-    const revData = await apiRequest<{ reviews: ReviewType[] }>(`/api/reviews?menuItemId=${productId}&status=approved`);
-    setReviews(revData.reviews || []);
+    try {
+      setReviewsError(null);
+      const revData = await apiRequest<{ reviews: ReviewType[] }>(`/api/reviews?menuItemId=${productId}&status=approved`);
+      setReviews(revData.reviews || []);
+    } catch {
+      setReviews([]);
+      setReviewsError('Reviews are temporarily unavailable.');
+    }
   }, []);
 
   /* Fetch product */
@@ -167,22 +176,31 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
     async function load() {
       try {
         setLoading(true);
+        setProductError(null);
         const data = await apiRequest<ProductType>(`/api/menu/${id}`);
         setProduct(data);
         if (data.variants?.length > 0) {
           setSelectedVariantId(data.variants[0].id || data.variants[0]._id || 'base');
         }
-        // Fetch related items from same category
-        const allItems = await apiRequest<ProductType[]>('/api/menu');
-        setRelatedItems(
-          allItems
-            .filter((i: ProductType) => i.category === data.category && (i._id || i.id) !== id)
-            .slice(0, 4)
-        );
-        // Fetch reviews for this product
-        await loadReviews(id);
-      } catch {
+        void apiRequest<ProductType[]>('/api/menu')
+          .then((allItems) => {
+            setRelatedItems(
+              allItems
+                .filter((item) => item.available !== false &&
+                  item.category === data.category &&
+                  (item._id || item.id) !== id)
+                .slice(0, 4),
+            );
+            setRelatedError(null);
+          })
+          .catch(() => {
+            setRelatedItems([]);
+            setRelatedError('Related products are temporarily unavailable.');
+          });
+        void loadReviews(id);
+      } catch (error) {
         setProduct(null);
+        setProductError(error instanceof ApiClientError ? error : new ApiClientError(503, null));
       } finally {
         setLoading(false);
       }
@@ -304,8 +322,14 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
     return (
       <div className="min-h-screen bg-[#0a0a0a] flex flex-col items-center justify-center text-white gap-4">
         <span className="text-6xl">🍽️</span>
-        <h1 className="text-3xl font-black">Product Not Found</h1>
-        <p className="text-gray-400">The item you are looking for does not exist.</p>
+        <h1 className="text-3xl font-black">
+          {productError?.status === 404 ? 'Product Not Found' : 'Menu Unavailable'}
+        </h1>
+        <p className="text-gray-400">
+          {productError?.status === 404
+            ? 'The item you are looking for does not exist or is no longer available.'
+            : 'The menu is temporarily unavailable. Please try again shortly.'}
+        </p>
         <Link href="/" className="btn-flame px-6 py-3 text-sm font-bold mt-4">
           ← Back to Menu
         </Link>
@@ -508,6 +532,7 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
         {/* ── Reviews ─── */}
         <div className="mb-20">
           <h2 className="text-2xl font-black text-white mb-8">Customer Reviews ({totalReviews})</h2>
+          {reviewsError && <p role="status" className="mb-4 text-sm text-amber-300">{reviewsError}</p>}
 
           {reviewSuccess && (
             <div className="mb-6 glass rounded-xl p-4 border border-green-500/20 text-green-400 text-sm">
@@ -587,7 +612,9 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
         </div>
 
         {/* ── Related Products ─── */}
-        {relatedItems.length > 0 && (
+        {relatedError ? (
+          <p role="status" className="mb-8 text-sm text-amber-300">{relatedError}</p>
+        ) : relatedItems.length > 0 && (
           <div className="mb-20">
             <h2 className="text-2xl font-black text-white mb-6">Related Products</h2>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">

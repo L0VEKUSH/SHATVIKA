@@ -132,17 +132,18 @@ function mergeLines(primary: ServerLine[], additions: ServerLine[]): ServerLine[
 function hydrateLines(lines: ServerLine[], products: MenuItem[]): CartItem[] {
   return lines.flatMap((line) => {
     const product = products.find((candidate) => candidate.id === line.menuItemId);
-    if (!product) return [];
+    if (!product || product.available === false) return [];
     const variant = product.variants.find((candidate) => candidate.id === (line.variantId || 'base')) ??
       (product.variants.length === 0 && (line.variantId === 'base' || !line.variantId)
         ? {
             id: 'base',
             name: 'Regular',
             price: product.basePrice ?? (product.basePricePaise ?? 0) / 100,
-            available: product.available !== false,
+            available: true,
           }
         : null);
     if (!variant) return [];
+    if (variant.available === false) return [];
     return [{
       id: `${product.id}-${variant.id}`,
       menuItemId: product.id,
@@ -242,7 +243,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
           ? null
           : lineSignature(hydrated, response.cart.couponCode);
         if (hydrated.length !== mergedLines.length) {
-          setCartPersistenceError('Some saved items are no longer in the current catalogue and were not restored.');
+          setCartPersistenceError('Some saved items are unavailable or no longer in the current catalogue and were not restored.');
         }
       })
       .catch((error) => {

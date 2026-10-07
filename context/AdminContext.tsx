@@ -288,16 +288,24 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const updateOrderStatus = useCallback(async (id: string, status: OrderStatus, reason?: string) => {
     const existing = orders.find((order) => order.id === id);
     if (!existing) return;
-    const response = await mutate(`order:update:${id}`, () => apiRequest<{ order: any }>(`/api/orders/${id}`, {
-      method: 'PUT',
-      body: {
-        orderStatus: status,
-        expectedVersion: existing.stateVersion,
-        ...(status === 'cancelled' ? { reason: reason?.trim() || 'Cancelled by administrator' } : {}),
-      },
-    }));
+    let response: { order: any } | null = null;
+    try {
+      response = await mutate(`order:update:${id}`, () => apiRequest<{ order: any }>(`/api/orders/${id}`, {
+        method: 'PUT',
+        body: {
+          orderStatus: status,
+          expectedVersion: existing.stateVersion,
+          ...(status === 'cancelled' ? { reason: reason?.trim() || 'Cancelled by administrator' } : {}),
+        },
+      }));
+    } catch {
+      response = null;
+    }
+    if (!response) {
+      await refresh();
+      return;
+    }
     if (response) setOrders((items) => items.map((order) => order.id === id ? normalizeBackendOrder(response.order) : order));
-    else await refresh();
   }, [mutate, orders, refresh]);
 
   const addCoupon = useCallback(async (coupon: Coupon) => {
