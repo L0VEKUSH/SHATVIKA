@@ -1,4 +1,4 @@
-/* ── Shared TypeScript types for SHATVIKA CORNER ── */
+/* ── Shared TypeScript types for SHATVIK CORNER ── */
 
 export interface Variant {
   id: string;

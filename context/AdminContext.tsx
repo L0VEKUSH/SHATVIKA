@@ -211,6 +211,16 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   const clearError = useCallback(() => setError(null), []);
 
+  const refreshOrders = useCallback(async () => {
+    if (!adminArea) return;
+    try {
+      const response = await apiRequest<{ ok: true; orders: any[] }>('/api/orders?pageSize=100');
+      setOrders(response.orders.map(normalizeBackendOrder));
+    } catch {
+      // Background poll failure should not necessarily crash the UI, so we swallow it here.
+    }
+  }, [adminArea]);
+
   const refresh = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -224,11 +234,13 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       apiRequest<Stat[]>('/api/content?type=stat'),
       apiRequest<TeamMember[]>('/api/content?type=teammember'),
       apiRequest<GalleryItem[]>('/api/content?type=galleryitem'),
-      adminArea
-        ? apiRequest<{ ok: true; orders: any[] }>('/api/orders?pageSize=100')
-        : Promise.resolve({ ok: true as const, orders: [] as any[] }),
     ] as const;
+
+    // We fetch orders concurrently but process separately
+    const ordersPromise = refreshOrders();
     const results = await Promise.allSettled(requests);
+    await ordersPromise;
+
     const failures = results.filter((result) => result.status === 'rejected');
     if (results[0]?.status === 'fulfilled') setAdminMenuItems(results[0].value.map(normalizeMenuItem));
     if (results[1]?.status === 'fulfilled') setCoupons(results[1].value.coupons.map(normalizeBackendCoupon));
@@ -237,16 +249,25 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     if (results[4]?.status === 'fulfilled') setStats(results[4].value);
     if (results[5]?.status === 'fulfilled') setTeamMembers(results[5].value);
     if (results[6]?.status === 'fulfilled') setGalleryItems(results[6].value);
-    if (adminArea && results[7].status === 'fulfilled') {
-      setOrders(results[7].value.orders.map(normalizeBackendOrder));
-    }
+
     if (failures.length) setError(`${failures.length} dashboard data source${failures.length === 1 ? '' : 's'} could not be loaded.`);
     setIsLoading(false);
-  }, [adminArea]);
+  }, [adminArea, refreshOrders]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!adminArea) return;
+    const interval = setInterval(() => {
+      // Do not poll if a mutation is actively running to prevent state tearing
+      if (mutationLocks.current.size === 0) {
+        void refreshOrders();
+      }
+    }, 10_000);
+    return () => clearInterval(interval);
+  }, [adminArea, refreshOrders]);
 
   const mutate = useCallback(async <T,>(key: string, operation: () => Promise<T>): Promise<T | null> => {
     if (mutationLocks.current.has(key)) return null;

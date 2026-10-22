@@ -38,6 +38,9 @@ export default function FinancePage() {
   const [stockForm, setStockForm] = useState({ menuItemId: '', type: 'wastage', quantity: '', reason: '' });
   const [periodForm, setPeriodForm] = useState({ month: new Date().toISOString().slice(0, 7), complete: false, note: '' });
 
+  const [voidPrompt, setVoidPrompt] = useState<Expense | null>(null);
+  const [voidReason, setVoidReason] = useState('');
+
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
@@ -69,12 +72,17 @@ export default function FinancePage() {
     } catch (caught) { setError(message(caught)); } finally { setBusy(false); }
   }
 
-  async function voidExpense(expense: Expense) {
-    const reason = window.prompt('Reason for voiding this expense record:')?.trim();
-    if (!reason || reason.length < 3 || reason.length > 300) {
-      window.alert('Enter a void reason between 3 and 300 characters.');
-      return;
-    }
+  function voidExpense(expense: Expense) {
+    setVoidPrompt(expense);
+    setVoidReason('');
+  }
+
+  async function confirmVoid() {
+    if (!voidPrompt) return;
+    const reason = voidReason.trim();
+    if (reason.length < 3 || reason.length > 300) return;
+    const expense = voidPrompt;
+    setVoidPrompt(null);
     setBusy(true); setError('');
     try { await apiRequest(`/api/admin/expenses/${expense.id}`, { method: 'PATCH', body: { reason, expectedVersion: expense.stateVersion } }); setNotice('Expense voided with an audit reason.'); await load(); }
     catch (caught) { setError(message(caught)); } finally { setBusy(false); }
@@ -112,6 +120,26 @@ export default function FinancePage() {
   const field = 'mt-1 w-full rounded-xl border border-white/10 bg-[#111] px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500';
   const card = 'rounded-2xl border border-white/10 bg-white/[0.025] p-5';
   return <div className="mx-auto max-w-7xl space-y-6">
+    {voidPrompt && (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+        <div className="w-full max-w-md rounded-2xl border border-red-500/30 bg-[#141414] p-6 shadow-2xl">
+          <h3 className="mb-2 text-lg font-bold text-white">Void Expense</h3>
+          <p className="mb-4 text-xs text-gray-400">Please provide a reason for voiding this expense (required). This will be recorded in the audit log.</p>
+          <input
+            autoFocus
+            type="text"
+            value={voidReason}
+            onChange={e => setVoidReason(e.target.value)}
+            placeholder="Void reason (3-300 chars)"
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white focus:border-red-500/50 focus:outline-none"
+          />
+          <div className="mt-5 flex gap-3">
+            <button onClick={() => { setVoidPrompt(null); setVoidReason(''); }} className="flex-1 rounded-xl bg-white/5 py-2.5 text-sm font-bold text-gray-300 hover:bg-white/10">Cancel</button>
+            <button onClick={confirmVoid} disabled={voidReason.trim().length < 3} className="flex-1 rounded-xl bg-red-600 py-2.5 text-sm font-bold text-white hover:bg-red-500 disabled:opacity-50">Confirm Void</button>
+          </div>
+        </div>
+      </div>
+    )}
     <header><h1 className="text-3xl font-black text-white">Costs, expenses & inventory</h1><p className="mt-2 text-sm text-gray-500">Auditable inputs for future cost snapshots, operating expenses, stock adjustments, and wastage. Ingredient/product/packaging costs are not counted again as operating expenses.</p></header>
     {error && <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{error}</div>}
     {notice && <div role="status" className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">{notice}</div>}

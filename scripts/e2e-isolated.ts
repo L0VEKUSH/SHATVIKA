@@ -151,7 +151,7 @@ async function run() {
       MONGODB_DB: databaseName,
       NEXT_PUBLIC_APP_URL: origin,
       NEXT_PUBLIC_SITE_URL: origin,
-      NEXT_PUBLIC_SITE_NAME: 'SHATVIKA CORNER ISOLATED E2E',
+      NEXT_PUBLIC_SITE_NAME: 'SHATVIK CORNER ISOLATED E2E',
       BUSINESS_TIME_ZONE: 'Asia/Kolkata',
       NEXT_PUBLIC_BUSINESS_TIME_ZONE: 'Asia/Kolkata',
       ADMIN_JWT_SECRET: 'isolated-e2e-admin-secret-0000000000000000000000000000',

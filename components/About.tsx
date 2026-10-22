@@ -56,7 +56,7 @@ export default function About() {
             </h2>
             <div className="space-y-4 text-gray-400 text-sm md:text-base leading-relaxed">
               <p>
-                SHATVIKA CORNER brings its menu, ordering, and customer account experience together in one place.
+                SHATVIK CORNER brings its menu, ordering, and customer account experience together in one place.
                 Current items, prices, and availability are read from the same catalogue used at checkout.
               </p>
               <p>
@@ -106,7 +106,7 @@ export default function About() {
                 >
                   🔥
                 </motion.span>
-                <p className="text-3xl font-black flame-text">SHATVIKA CORNER</p>
+                <p className="text-3xl font-black flame-text">SHATVIK CORNER</p>
                 <p className="text-gray-500 text-sm">Current information, clearly presented</p>
               </div>
 

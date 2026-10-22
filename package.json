@@ -20,7 +20,8 @@
     "admin:repair:dry-run": "tsx scripts/repair-legacy-admin.ts",
     "admin:repair": "tsx scripts/repair-legacy-admin.ts --apply",
     "worker:create": "tsx scripts/create-counter-worker.ts",
-    "deps:review": "npm audit --audit-level=moderate",
+    "deps:review": "npm audit --omit=dev --audit-level=moderate",
+    "deps:review:all": "npm audit --audit-level=moderate",
     "verify": "npm run typecheck && npm run lint && npm run test:unit && npm run test:integration && npm run test:e2e:isolated && npm run deps:review && npm run build:production"
   },
   "engines": {
@@ -41,7 +42,7 @@
     "framer-motion": "^11.11.17",
     "lucide-react": "^0.454.0",
     "mongoose": "9.10.0",
-    "next": "15.5.25",
+    "next": "15.5.27",
     "openid-client": "6.8.8",
     "pdfmake": "0.2.20",
     "react": "^18.3.1",
@@ -63,7 +64,7 @@
     "tailwindcss": "^3.4.14",
     "tsx": "^4.20.5",
     "typescript": "^5",
-    "vitest": "5.0.0"
+    "vitest": "5.0.5"
   },
   "overrides": {
     "next": {

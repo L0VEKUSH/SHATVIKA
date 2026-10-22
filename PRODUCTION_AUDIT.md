@@ -204,7 +204,7 @@ The following statuses were checked without displaying values:
 | `ADMIN_JWT_SECRET`, `CUSTOMER_JWT_SECRET`, `WORKER_JWT_SECRET`, `CSRF_SECRET` | REQUIRED | Configured, independent, and accepted by runtime readiness checks |
 | `ADMIN_SETUP_KEY` | PRODUCTION ONLY / one-time | Present locally; bootstrap is disabled by route default when the flag is absent, but deployment must explicitly set `ADMIN_BOOTSTRAP_ENABLED=false` and remove setup material after bootstrap |
 | `ADMIN_BOOTSTRAP_ENABLED` | PRODUCTION ONLY | Not explicitly present in the local environment; the route fails closed unless it equals `true` |
-| `COUNTER_LOCATION_ID`, `COUNTER_LOCATION_NAME`, `COUNTER_TOKEN_PREFIX` | REQUIRED | Configured; canonical location is `shatvika-corner`, name is `Shatvika Corner`, prefix is `SC` |
+| `COUNTER_LOCATION_ID`, `COUNTER_LOCATION_NAME`, `COUNTER_TOKEN_PREFIX` | REQUIRED | Configured; canonical location is `shatvika-corner`, name is `Shatvik Corner`, prefix is `SC` |
 | `DELIVERY_ENABLED` | PRODUCTION ONLY | Explicitly `false`; delivery is also hard-disabled in server fulfillment capabilities |
 | `TAX_RATE_BASIS_POINTS` | REQUIRED | Configured; checkout rules load successfully |
 | `BUSINESS_TIME_ZONE` | REQUIRED | Configured as `Asia/Kolkata` |

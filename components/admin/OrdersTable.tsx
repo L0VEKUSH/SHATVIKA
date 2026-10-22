@@ -47,29 +47,67 @@ const STATUS_EMOJIS: Record<OrderStatus, string> = {
 
 function OrderRow({ order }: { order: Order }) {
   const { updateOrderStatus } = useAdmin();
+  const [cancelPrompt, setCancelPrompt] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
   const [expanded, setExpanded] = useState(false);
   const [selectOpen, setSelectOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
   const transitions = allowedOrderTransitions(order.status, 'admin');
 
   const selectStatus = async (status: OrderStatus) => {
-    let reason: string | undefined;
     if (status === 'cancelled') {
-      const supplied = window.prompt('Record the cancellation reason (required):')?.trim();
-      if (!supplied || supplied.length < 3 || supplied.length > 300) {
-        window.alert('Enter a cancellation reason between 3 and 300 characters.');
-        return;
-      }
-      reason = supplied;
+      setCancelPrompt(true);
+      setSelectOpen(false);
+      return;
     }
+    await executeStatusChange(status);
+  };
+
+  const executeStatusChange = async (status: OrderStatus, reason?: string) => {
     setUpdating(true);
     setSelectOpen(false);
     await updateOrderStatus(order.id, status, reason);
     setUpdating(false);
   };
 
+  const confirmCancel = async () => {
+    const trimmed = cancelReason.trim();
+    if (trimmed.length < 3 || trimmed.length > 300) return;
+    setCancelPrompt(false);
+    await executeStatusChange('cancelled', trimmed);
+    setCancelReason('');
+  };
+
   return (
     <>
+      <AnimatePresence>
+        {cancelPrompt && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-md rounded-2xl border border-red-500/30 bg-[#141414] p-6 shadow-2xl"
+            >
+              <h3 className="mb-2 text-lg font-bold text-white">Cancel Order {order.id}</h3>
+              <p className="mb-4 text-xs text-gray-400">Please provide a reason for cancelling this order (required). This will be recorded in the audit log.</p>
+              <input
+                autoFocus
+                type="text"
+                value={cancelReason}
+                onChange={e => setCancelReason(e.target.value)}
+                placeholder="Cancellation reason (3-300 chars)"
+                className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white focus:border-red-500/50 focus:outline-none"
+              />
+              <div className="mt-5 flex gap-3">
+                <button onClick={() => { setCancelPrompt(false); setCancelReason(''); }} className="flex-1 rounded-xl bg-white/5 py-2.5 text-sm font-bold text-gray-300 hover:bg-white/10">Abort</button>
+                <button onClick={confirmCancel} disabled={cancelReason.trim().length < 3} className="flex-1 rounded-xl bg-red-600 py-2.5 text-sm font-bold text-white hover:bg-red-500 disabled:opacity-50">Confirm Cancel</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <tr className="border-b border-white/5 hover:bg-white/3 transition-colors">
         <td className="px-4 py-3 text-xs font-mono text-[#FF8C00]">{order.id}</td>
         <td className="px-4 py-3">

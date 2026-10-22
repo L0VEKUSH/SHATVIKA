@@ -360,7 +360,7 @@ function ReviewCard({ review }: { review: ReviewWithHelp }) {
       {/* Admin reply */}
       {review.replyText ? (
         <div className="mb-4 rounded-xl bg-[#FF4500]/10 border border-[#FF4500]/20 p-4">
-          <p className="text-xs font-bold text-[#FF8C00] mb-1">Response from SHATVIKA CORNER</p>
+          <p className="text-xs font-bold text-[#FF8C00] mb-1">Response from SHATVIK CORNER</p>
           <p className="text-sm text-gray-300">{review.replyText}</p>
         </div>
       ) : null}
@@ -477,7 +477,7 @@ export default function Reviews() {
             What People <span className="flame-text">Say</span>
           </h2>
           <p className="text-gray-400 text-sm md:text-base max-w-2xl mx-auto">
-            Real reviews from real SHATVIKA CORNER fans. Help us improve and inspire others!
+            Real reviews from real SHATVIK CORNER fans. Help us improve and inspire others!
           </p>
         </motion.div>
 

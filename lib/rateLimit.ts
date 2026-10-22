@@ -106,14 +106,15 @@ export function checkRateLimit(
  * Handles X-Forwarded-For header (for proxies) and direct connection
  */
 export function getClientIp(request: Request): string {
-  if (process.env.TRUST_CF_CONNECTING_IP === 'true') {
+  if (process.env.TRUST_CF_CONNECTING_IP?.trim().toLowerCase() === 'true') {
     const cloudflareIp = request.headers.get('cf-connecting-ip')?.trim() ?? '';
     if (isIP(cloudflareIp)) return cloudflareIp;
   }
 
-  const trustedHops = Number.parseInt(process.env.TRUSTED_PROXY_HOPS ?? '0', 10);
+  const rawTrustedHops = process.env.TRUSTED_PROXY_HOPS?.trim() ?? '0';
+  const trustedHops = /^\d+$/.test(rawTrustedHops) ? Number(rawTrustedHops) : 0;
   const forwarded = request.headers.get('x-forwarded-for');
-  if (Number.isSafeInteger(trustedHops) && trustedHops > 0 && forwarded) {
+  if (Number.isSafeInteger(trustedHops) && trustedHops > 0 && trustedHops <= 10 && forwarded) {
     const chain = forwarded.split(',').map(value => value.trim()).filter(value => isIP(value));
     const candidate = chain[Math.max(0, chain.length - trustedHops)];
     if (candidate) return candidate;

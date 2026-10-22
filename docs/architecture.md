@@ -2,7 +2,7 @@
 
 ## Runtime and boundaries
 
-SHATVIKA CORNER is a single Next.js App Router application. React client components provide interactive public, customer, worker, and administrator experiences. Node.js route handlers own persistence and business rules. MongoDB is the system of record and Mongoose defines schemas, indexes, and middleware.
+SHATVIK CORNER is a single Next.js App Router application. React client components provide interactive public, customer, worker, and administrator experiences. Node.js route handlers own persistence and business rules. MongoDB is the system of record and Mongoose defines schemas, indexes, and middleware.
 
 The three authenticated roles are deliberately separate:
 

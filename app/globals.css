@@ -183,7 +183,8 @@ body {
 .text-glow   { text-shadow: 0 0 30px rgba(255,69,0,0.6); }
 
 /* ─── Section Utility ───────────────────────────────── */
-.section-pad { padding: 6rem 1.5rem; }
+.section-pad { padding: 3.5rem 1rem; }
+@media (min-width: 640px)  { .section-pad { padding: 5rem 1.5rem; } }
 @media (min-width: 768px)  { .section-pad { padding: 7rem 3rem; } }
 @media (min-width: 1280px) { .section-pad { padding: 8rem 4rem; } }
 

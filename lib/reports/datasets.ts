@@ -416,7 +416,7 @@ export function buildBusinessReport(
     snapshot.meta.filters.search ? `Token/order search: ${snapshot.meta.filters.search}` : '',
   ].filter(Boolean);
   return {
-    title: 'SHATVIKA CORNER Business Report',
+    title: 'SHATVIK CORNER Business Report',
     reportType,
     // Use the analytics snapshot instant so every format carries the same reproducible as-of value.
     generatedAt,

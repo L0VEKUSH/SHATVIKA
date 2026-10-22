@@ -78,6 +78,8 @@ export default function CounterPage() {
   const [orderErrors, setOrderErrors] = useState<Record<string, string>>({});
   const [paymentDrafts, setPaymentDrafts] = useState<Record<string, PaymentDraft>>({});
   const paymentKeys = useRef<Record<string, string>>({});
+  const [cancelPrompt, setCancelPrompt] = useState<QueueOrder | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
 
   const loadQueue = useCallback(async (quiet = false) => {
     if (quiet) setRefreshing(true); else setLoading(true);
@@ -105,7 +107,12 @@ export default function CounterPage() {
 
   useEffect(() => {
     void loadQueue();
-    const timer = window.setInterval(() => void loadQueue(true), 5_000);
+    const timer = window.setInterval(() => {
+      setBusyId((currentBusyId) => {
+        if (!currentBusyId) void loadQueue(true);
+        return currentBusyId;
+      });
+    }, 5_000);
     return () => window.clearInterval(timer);
   }, [loadQueue]);
 
@@ -113,15 +120,12 @@ export default function CounterPage() {
     setOrders(current => current.map(order => order.id === id ? { ...order, ...patch } : order));
   }
 
-  async function updateStatus(order: QueueOrder, nextStatus: CounterStatus) {
+  async function updateStatus(order: QueueOrder, nextStatus: CounterStatus, reason?: string) {
     if (busyId) return;
-    let reason: string | undefined;
-    if (nextStatus === 'cancelled') {
-      reason = window.prompt('Cancellation reason (required):')?.trim() || undefined;
-      if (!reason || reason.length < 3 || reason.length > 300) {
-        window.alert('Enter a cancellation reason between 3 and 300 characters.');
-        return;
-      }
+    if (nextStatus === 'cancelled' && !reason) {
+      setCancelPrompt(order);
+      setCancelReason('');
+      return;
     }
     setBusyId(order.id);
     setOrderErrors(current => ({ ...current, [order.id]: '' }));
@@ -137,6 +141,15 @@ export default function CounterPage() {
     } finally {
       setBusyId(null);
     }
+  }
+
+  async function confirmCancel() {
+    if (!cancelPrompt) return;
+    const trimmed = cancelReason.trim();
+    if (trimmed.length < 3 || trimmed.length > 300) return;
+    const order = cancelPrompt;
+    setCancelPrompt(null);
+    await updateStatus(order, 'cancelled', trimmed);
   }
 
   async function recordPayment(order: QueueOrder) {
@@ -181,10 +194,31 @@ export default function CounterPage() {
     <main id="main-content" className="min-h-screen bg-[#090909] text-white">
       <header className="sticky top-0 z-20 border-b border-white/10 bg-[#090909]/95 px-4 py-4 backdrop-blur sm:px-6">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3">
-          <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-orange-400">Shatvika Corner</p><h1 className="text-2xl font-black">Live token queue</h1></div>
+          <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-orange-400">Shatvik Corner</p><h1 className="text-2xl font-black">Live token queue</h1></div>
           <div className="flex items-center gap-3 text-sm"><span className="text-gray-300">{workerName}</span><button onClick={logout} className="rounded-lg border border-white/15 px-3 py-2 font-semibold hover:border-orange-400">Sign out</button></div>
         </div>
       </header>
+
+      {cancelPrompt && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-red-500/30 bg-[#141414] p-6 shadow-2xl">
+            <h3 className="mb-2 text-lg font-bold text-white">Cancel Token {cancelPrompt.tokenNumber}</h3>
+            <p className="mb-4 text-xs text-gray-400">Please provide a reason for cancelling this order (required). This will be recorded in the audit log.</p>
+            <input
+              autoFocus
+              type="text"
+              value={cancelReason}
+              onChange={e => setCancelReason(e.target.value)}
+              placeholder="Cancellation reason (3-300 chars)"
+              className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white focus:border-red-500/50 focus:outline-none"
+            />
+            <div className="mt-5 flex gap-3">
+              <button onClick={() => { setCancelPrompt(null); setCancelReason(''); }} className="flex-1 rounded-xl bg-white/5 py-2.5 text-sm font-bold text-gray-300 hover:bg-white/10">Abort</button>
+              <button onClick={confirmCancel} disabled={cancelReason.trim().length < 3} className="flex-1 rounded-xl bg-red-600 py-2.5 text-sm font-bold text-white hover:bg-red-500 disabled:opacity-50">Confirm Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="mx-auto max-w-7xl p-4 sm:p-6">
         <div className="grid gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:grid-cols-4">

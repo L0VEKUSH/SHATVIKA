@@ -426,7 +426,7 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
                 </div>
               </div>
 
-              <p className="mt-4 text-xs leading-5 text-amber-100">Delivery currently unavailable — collect at Shatvika Corner. Keep this token; it remains available in My Orders.</p>
+              <p className="mt-4 text-xs leading-5 text-amber-100">Delivery currently unavailable — collect at Shatvik Corner. Keep this token; it remains available in My Orders.</p>
               {!customer && <p className="mt-2 text-[11px] leading-5 text-gray-400">Guest history is saved privately in this browser and may be lost if browser data is cleared or the guest session expires.</p>}
               <a href="/orders" className="mt-4 block min-h-11 rounded-xl border border-white/15 px-4 py-3 text-sm font-bold text-white hover:bg-white/5">Open My Orders</a>
               <button
@@ -467,7 +467,7 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
               <div className="flex items-center justify-between p-5 pb-3">
                 <div className="flex items-center gap-2.5">
                   <ShoppingBag className="w-5 h-5 text-[#FF4500]" />
-                  <h2 className="text-lg font-black text-white">SHATVIKA CORNER</h2>
+                  <h2 className="text-lg font-black text-white">SHATVIK CORNER</h2>
                 </div>
                 <div className="flex items-center gap-2">
                   {activeTab === 'cart' && items.length > 0 && (
@@ -530,67 +530,68 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
                   </div>
                 ) : (
                   <div className="flex-1 flex flex-col overflow-hidden">
-                    {/* Cart items list */}
-                    <div className="flex-1 overflow-y-auto p-5 space-y-3">
-                      <AnimatePresence>
-                        {items.map((item: CartItem) => (
-                          <motion.div
-                            key={item.id}
-                            layout
-                            initial={{ opacity: 0, x: 30 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            exit={{ opacity: 0, x: -30, height: 0, marginBottom: 0, padding: 0 }}
-                            transition={{ duration: 0.28 }}
-                            className={`flex items-center gap-3 rounded-2xl p-3.5 border border-white/6 ${item.gradientClass}`}
-                          >
-                            <div className="w-12 h-12 rounded-xl bg-black/20 flex items-center justify-center shrink-0 text-2xl">
-                              {item.emoji}
-                            </div>
-
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-bold text-white truncate">{item.menuItemName}</p>
-                              <p className="text-xs text-gray-400">{item.variantName}</p>
-                              <p className="flame-text text-sm font-black mt-0.5">₹{(item.variantPrice * item.quantity).toFixed(2)}</p>
-                            </div>
-
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              <button
-                                onClick={() => updateQuantity(item.id, item.quantity - 1)}
-                                aria-label="Decrease quantity"
-                                className="w-7 h-7 rounded-full bg-black/30 hover:bg-black/50
-                                           flex items-center justify-center transition-colors"
-                              >
-                                <Minus className="w-3 h-3 text-white" />
-                              </button>
-                              <span className="text-white font-bold text-sm w-5 text-center">{item.quantity}</span>
-                              <button
-                                onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                                aria-label="Increase quantity"
-                                className="w-7 h-7 rounded-full bg-[#FF4500]/30 hover:bg-[#FF4500]/50
-                                           flex items-center justify-center transition-colors"
-                              >
-                                <Plus className="w-3 h-3 text-white" />
-                              </button>
-                            </div>
-
-                            <button
-                              onClick={() => removeFromCart(item.id)}
-                              aria-label="Remove item"
-                              className="w-7 h-7 rounded-full bg-black/20 hover:bg-red-500/20
-                                         flex items-center justify-center transition-colors shrink-0"
+                    {/* Scrollable area: Items + Detailed summary */}
+                    <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+                      {/* Cart items list */}
+                      <div className="space-y-3">
+                        <AnimatePresence>
+                          {items.map((item: CartItem) => (
+                            <motion.div
+                              key={item.id}
+                              layout
+                              initial={{ opacity: 0, x: 30 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              exit={{ opacity: 0, x: -30, height: 0, marginBottom: 0, padding: 0 }}
+                              transition={{ duration: 0.28 }}
+                              className={`flex items-center gap-3 rounded-2xl p-3 sm:p-3.5 border border-white/6 ${item.gradientClass}`}
                             >
-                              <Trash2 className="w-3 h-3 text-gray-500 hover:text-red-400" />
-                            </button>
-                          </motion.div>
-                        ))}
-                      </AnimatePresence>
-                    </div>
+                              <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-black/20 flex items-center justify-center shrink-0 text-xl sm:text-2xl">
+                                {item.emoji}
+                              </div>
 
-                    {/* Order summary calculations */}
-                    <div className="px-5 py-4 border-t border-white/6 bg-[#0f0f0f] shrink-0">
-                      <div className="space-y-2 mb-4">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs sm:text-sm font-bold text-white truncate">{item.menuItemName}</p>
+                                <p className="text-[11px] text-gray-400">{item.variantName}</p>
+                                <p className="flame-text text-xs sm:text-sm font-black mt-0.5">₹{(item.variantPrice * item.quantity).toFixed(2)}</p>
+                              </div>
+
+                              <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+                                <button
+                                  onClick={() => updateQuantity(item.id, item.quantity - 1)}
+                                  aria-label="Decrease quantity"
+                                  className="w-7 h-7 rounded-full bg-black/30 hover:bg-black/50
+                                             flex items-center justify-center transition-colors"
+                                >
+                                  <Minus className="w-3 h-3 text-white" />
+                                </button>
+                                <span className="text-white font-bold text-xs sm:text-sm w-4 sm:w-5 text-center">{item.quantity}</span>
+                                <button
+                                  onClick={() => updateQuantity(item.id, item.quantity + 1)}
+                                  aria-label="Increase quantity"
+                                  className="w-7 h-7 rounded-full bg-[#FF4500]/30 hover:bg-[#FF4500]/50
+                                             flex items-center justify-center transition-colors"
+                                >
+                                  <Plus className="w-3 h-3 text-white" />
+                                </button>
+                              </div>
+
+                              <button
+                                onClick={() => removeFromCart(item.id)}
+                                aria-label="Remove item"
+                                className="w-7 h-7 rounded-full bg-black/20 hover:bg-red-500/20
+                                           flex items-center justify-center transition-colors shrink-0"
+                              >
+                                <Trash2 className="w-3 h-3 text-gray-500 hover:text-red-400" />
+                              </button>
+                            </motion.div>
+                          ))}
+                        </AnimatePresence>
+                      </div>
+
+                      {/* Summary details inside scrollable area */}
+                      <div className="pt-4 border-t border-white/10 space-y-3">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs text-gray-500 font-medium">Subtotal</span>
+                          <span className="text-xs text-gray-400 font-medium">Subtotal ({items.length} items)</span>
                           <span className="text-xs font-bold text-white">₹{subtotal.toFixed(2)}</span>
                         </div>
 
@@ -606,71 +607,81 @@ export default function Cart({ isOpen, onClose, initialTab = 'cart' }: CartProps
                           </div>
                         )}
 
-                        <div className="border-t border-white/8 pt-2 flex items-center justify-between">
-                          <span className="text-sm font-bold text-white">Estimated merchandise total</span>
-                          <span className="flame-text text-lg font-black">₹{subtotalAfterDiscount.toFixed(2)}</span>
-                        </div>
+                        {checkoutError && (
+                          <p role="alert" className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                            {checkoutError}
+                          </p>
+                        )}
+
+                        {(stockCheckPending || stockCheckError || Object.keys(stockIssues).length > 0) && (
+                          <div role="status" className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                            {stockCheckPending ? <p>Checking current stock…</p> : (
+                              <>
+                                {stockCheckError && <p>{stockCheckError}</p>}
+                                {Object.values(stockIssues).map(message => <p key={message}>{message}</p>)}
+                                <button type="button" onClick={() => setStockRefresh(value => value + 1)} className="mt-1 font-bold underline underline-offset-2">Retry stock check</button>
+                              </>
+                            )}
+                          </div>
+                        )}
+
+                        {cartPersistenceError && (
+                          <div role="alert" className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                            <p>{cartPersistenceError}</p>
+                            {customer && (
+                              <button type="button" onClick={retryCartSync} className="mt-1 font-bold underline underline-offset-2">
+                                Retry account sync
+                              </button>
+                            )}
+                          </div>
+                        )}
+
+                        {isCartSyncing && customer && (
+                          <p role="status" className="text-center text-[10px] text-gray-500">Saving cart to your account…</p>
+                        )}
+
+                        {customer && claimableGuestOrders > 0 && (
+                          <div className="rounded-xl border border-sky-400/20 bg-sky-400/10 p-3 text-xs text-sky-100">
+                            <p>{claimableGuestOrders} order{claimableGuestOrders === 1 ? '' : 's'} from this browser can be saved to your account.</p>
+                            <button type="button" onClick={() => void claimGuestOrders()} disabled={claimingGuestOrders} className="mt-2 font-bold underline underline-offset-2 disabled:opacity-50">{claimingGuestOrders ? 'Saving…' : 'Save authorized guest orders'}</button>
+                          </div>
+                        )}
+
                         <p className="text-[10px] leading-relaxed text-gray-500">
-                          Configured tax, availability and the coupon are recalculated by the server before confirmation. No delivery fee is charged.
+                          Configured tax, availability and coupon are confirmed by the server. Zero delivery fee for counter pickup.
                         </p>
+
+                        {!customer && (
+                          <div className="text-center text-xs text-gray-400 pt-1">
+                            {googleAvailable === true ? (
+                              <a href="/api/auth/google/start?returnTo=%2F%3FconfirmOrder%3D1" className="inline-flex min-h-9 items-center justify-center rounded-lg border border-white/15 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/5">Continue with Google (optional)</a>
+                            ) : null}
+                            <p className="mt-1.5 text-[10px] leading-4 text-gray-500">A Shatvik password or OTP is not required for guest checkout.</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Compact Sticky Mobile Checkout Bar */}
+                    <div className="p-3.5 sm:p-5 border-t border-white/10 bg-[#0d0d0d] shrink-0 shadow-2xl">
+                      <div className="flex items-center justify-between mb-2 sm:mb-2.5">
+                        <div>
+                          <span className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold block">Items after discount (before tax)</span>
+                          <span className="flame-text text-lg sm:text-xl font-black">₹{subtotalAfterDiscount.toFixed(2)}</span>
+                        </div>
+                        <span className="text-[10px] text-amber-300 bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded-full font-semibold">
+                          Counter Pickup
+                        </span>
                       </div>
 
-                      {checkoutError && (
-                        <p role="alert" className="mb-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-                          {checkoutError}
-                        </p>
-                      )}
-                      {(stockCheckPending || stockCheckError || Object.keys(stockIssues).length > 0) && (
-                        <div role="status" className="mb-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                          {stockCheckPending ? <p>Checking current stock…</p> : (
-                            <>
-                              {stockCheckError && <p>{stockCheckError}</p>}
-                              {Object.values(stockIssues).map(message => <p key={message}>{message}</p>)}
-                              <button type="button" onClick={() => setStockRefresh(value => value + 1)} className="mt-1 font-bold underline underline-offset-2">Retry stock check</button>
-                            </>
-                          )}
-                        </div>
-                      )}
-                      {cartPersistenceError && (
-                        <div role="alert" className="mb-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                          <p>{cartPersistenceError}</p>
-                          {customer && (
-                            <button type="button" onClick={retryCartSync} className="mt-1 font-bold underline underline-offset-2">
-                              Retry account sync
-                            </button>
-                          )}
-                        </div>
-                      )}
-                      {isCartSyncing && customer && (
-                        <p role="status" className="mb-3 text-center text-[10px] text-gray-500">Saving cart to your account…</p>
-                      )}
-                      {customer && claimableGuestOrders > 0 && (
-                        <div className="mb-3 rounded-xl border border-sky-400/20 bg-sky-400/10 p-3 text-xs text-sky-100">
-                          <p>{claimableGuestOrders} order{claimableGuestOrders === 1 ? '' : 's'} from this browser can be saved to your account.</p>
-                          <button type="button" onClick={() => void claimGuestOrders()} disabled={claimingGuestOrders} className="mt-2 font-bold underline underline-offset-2 disabled:opacity-50">{claimingGuestOrders ? 'Saving…' : 'Save authorized guest orders'}</button>
-                        </div>
-                      )}
                       <button
                         onClick={handleCheckout}
                         disabled={checkoutPending || stockCheckPending || Boolean(stockCheckError) || Object.keys(stockIssues).length > 0}
-                        className="btn-flame w-full py-4 text-base font-bold flex items-center justify-center gap-2 group disabled:opacity-50"
+                        className="btn-flame w-full py-3.5 text-sm sm:text-base font-bold flex items-center justify-center gap-2 group disabled:opacity-50 shadow-lg shadow-[#FF4500]/25"
                       >
                         <span>{checkoutPending ? 'Confirming safely…' : 'Confirm order & get token'}</span>
                         <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                       </button>
-
-                      {!customer && (
-                        <div className="mt-3 text-center text-xs text-gray-400">
-                          {googleAvailable === true ? (
-                            <a href="/api/auth/google/start?returnTo=%2F%3FconfirmOrder%3D1" className="inline-flex min-h-10 items-center justify-center rounded-lg border border-white/15 px-4 py-2 font-semibold text-white hover:bg-white/5">Continue with Google (optional)</a>
-                          ) : googleAvailable === false ? (
-                            <p>Google sign-in is not configured. Guest checkout remains available.</p>
-                          ) : <p>Checking optional account sign-in…</p>}
-                          <p className="mt-2 text-[10px] leading-4 text-gray-500">Google may request its own authentication or security verification. A Shatvika password or OTP is not required for guest checkout.</p>
-                        </div>
-                      )}
-
-                      <p className="mt-3 text-center text-[11px] text-amber-200/80">Delivery currently unavailable — collect at Shatvika Corner. Pay at counter by cash or verified UPI.</p>
                     </div>
                   </div>
                 )

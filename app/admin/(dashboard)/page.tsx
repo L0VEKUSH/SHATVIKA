@@ -397,7 +397,7 @@ export default function AdminDashboard() {
     <div className="mx-auto max-w-[96rem] space-y-10 pb-16">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.22em] text-[#FF8C00]"><Flame className="h-4 w-4" /> SHATVIKA CORNER</p>
+          <p className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.22em] text-[#FF8C00]"><Flame className="h-4 w-4" /> SHATVIK CORNER</p>
           <h1 className="mt-1 text-2xl font-black text-white sm:text-3xl">Business command centre</h1>
           <p className="mt-2 max-w-3xl text-xs leading-relaxed text-gray-500">Authorized operational and financial analysis from recorded order, payment, inventory, customer, coupon, and feedback data.</p>
         </div>

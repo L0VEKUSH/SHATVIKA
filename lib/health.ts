@@ -13,6 +13,8 @@ export interface RuntimeConfigurationHealth {
     canonicalOrigin: boolean;
     sessionSecurity: boolean;
     checkoutRules: boolean;
+    clientIpRateLimiting: boolean;
+    adminBootstrapDisabled: boolean;
   };
   integrations: {
     passwordResetEmail: IntegrationState;
@@ -52,6 +54,13 @@ function hasCanonicalOrigin(environment: Environment): boolean {
   } catch {
     return false;
   }
+}
+
+function hasTrustedClientIpConfiguration(environment: Environment): boolean {
+  if (environment.NODE_ENV !== 'production') return true;
+  if (environment.TRUST_CF_CONNECTING_IP?.trim().toLowerCase() === 'true') return true;
+  const hops = environment.TRUSTED_PROXY_HOPS?.trim() ?? '0';
+  return /^\d+$/.test(hops) && Number.isSafeInteger(Number(hops)) && Number(hops) > 0 && Number(hops) <= 10;
 }
 
 function integrationState(
@@ -101,6 +110,8 @@ export function assessRuntimeConfiguration(
     canonicalOrigin: hasCanonicalOrigin(environment),
     sessionSecurity: hasSecureIndependentSecrets(environment),
     checkoutRules,
+    clientIpRateLimiting: hasTrustedClientIpConfiguration(environment),
+    adminBootstrapDisabled: environment.ADMIN_BOOTSTRAP_ENABLED?.trim().toLowerCase() !== 'true',
   };
   const integrations = {
     passwordResetEmail,

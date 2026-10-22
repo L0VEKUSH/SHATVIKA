@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { apiRequest } from '@/lib/apiClient';
 import { safeReturnPath } from '@/lib/returnPath';
@@ -80,6 +81,10 @@ export default function AdminLoginPage() {
             {submitting ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
+        <p className="mt-5 text-xs text-gray-500">
+          First admin setup?{' '}
+          <Link href="/admin/signup" className="font-semibold text-[#FF8C00] hover:underline">Create the initial admin account</Link>
+        </p>
       </div>
     </div>
   );

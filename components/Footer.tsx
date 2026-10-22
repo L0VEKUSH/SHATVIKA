@@ -43,9 +43,9 @@ export default function Footer() {
         <section aria-labelledby="footer-brand">
           <a href="#home" onClick={event => { event.preventDefault(); scrollTo('#home'); }} className="mb-5 flex w-fit items-center gap-2.5">
             <span aria-hidden className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[#FF4500] to-[#FFD700] font-black text-[#0a0a0a]">SC</span>
-            <span id="footer-brand" className="text-xl font-black tracking-tight"><span className="flame-text">Shatvika</span><span className="text-white"> Corner</span></span>
+            <span id="footer-brand" className="text-xl font-black tracking-tight"><span className="flame-text">Shatvik</span><span className="text-white"> Corner</span></span>
           </a>
-          <p className="mb-6 text-sm leading-relaxed text-gray-500">Menu, ordering, and account services from SHATVIKA CORNER.</p>
+          <p className="mb-6 text-sm leading-relaxed text-gray-500">Menu, ordering, and account services from SHATVIK CORNER.</p>
           <div className="space-y-2.5 text-xs text-gray-500">
             {address && <p className="flex items-start gap-2.5"><MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#FF4500]" aria-hidden="true" /><span>{address}</span></p>}
             {phone && <p><a className="flex items-center gap-2.5 hover:text-white" href={`tel:${phone.replace(/[^+\d]/g, '')}`}><Phone className="h-3.5 w-3.5 text-[#FF4500]" aria-hidden="true" />{phone}</a></p>}
@@ -72,12 +72,17 @@ export default function Footer() {
             <li><Link href="/policies#privacy" className="text-sm text-gray-500 hover:text-[#FF8C00]">Privacy notice</Link></li>
             <li><Link href="/policies#tax" className="text-sm text-gray-500 hover:text-[#FF8C00]">Tax information</Link></li>
           </ul>
-          {instagram && <a href={instagram} target="_blank" rel="noopener noreferrer" className="mt-7 inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 text-gray-500 hover:text-white" aria-label="SHATVIKA CORNER on Instagram"><Instagram className="h-4 w-4" aria-hidden="true" /></a>}
+          <h3 className="mb-3 mt-7 text-xs font-bold uppercase tracking-wider text-gray-300">Staff sign-in</h3>
+          <ul className="space-y-2.5">
+            <li><Link href="/admin/login" className="text-sm text-gray-500 hover:text-[#FF8C00]">Admin login</Link></li>
+            <li><Link href="/counter/login" className="text-sm text-gray-500 hover:text-[#FF8C00]">Counter login</Link></li>
+          </ul>
+          {instagram && <a href={instagram} target="_blank" rel="noopener noreferrer" className="mt-7 inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 text-gray-500 hover:text-white" aria-label="SHATVIK CORNER on Instagram"><Instagram className="h-4 w-4" aria-hidden="true" /></a>}
         </motion.section>
       </div>
 
-      <div className="border-t border-white/5"><div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 px-6 py-5 sm:flex-row md:px-8"><p className="text-center text-xs text-gray-600 sm:text-left">© {new Date().getFullYear()} SHATVIKA CORNER.</p><Link href="/sitemap.xml" className="text-xs text-gray-600 hover:text-gray-400">Sitemap</Link></div></div>
-      <motion.button type="button" aria-label="Scroll to top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} initial={{ scale: 0 }} animate={{ scale: 1 }} whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.95 }} className="fixed bottom-6 right-6 z-40 flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-[#FF4500] to-[#FF8C00] font-bold text-white shadow-xl shadow-[#FF4500]/30 focus:outline-none focus:ring-2 focus:ring-[#FFD700] focus:ring-offset-2 focus:ring-offset-black"><span aria-hidden>↑</span></motion.button>
+      <div className="border-t border-white/5"><div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 px-6 py-5 sm:flex-row md:px-8"><p className="text-center text-xs text-gray-600 sm:text-left">© {new Date().getFullYear()} SHATVIK CORNER.</p><Link href="/sitemap.xml" className="text-xs text-gray-600 hover:text-gray-400">Sitemap</Link></div></div>
+      <motion.button type="button" aria-label="Scroll to top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} initial={{ scale: 0 }} animate={{ scale: 1 }} whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.95 }} className="fixed bottom-20 sm:bottom-6 right-4 sm:right-6 z-40 flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-full bg-gradient-to-br from-[#FF4500] to-[#FF8C00] font-bold text-white shadow-xl shadow-[#FF4500]/30 focus:outline-none focus:ring-2 focus:ring-[#FFD700] focus:ring-offset-2 focus:ring-offset-black"><span aria-hidden>↑</span></motion.button>
     </footer>
   );
 }

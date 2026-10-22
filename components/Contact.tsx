@@ -315,7 +315,7 @@ export default function Contact() {
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#FFD700]"
-                  aria-label="Open SHATVIKA CORNER on Instagram"
+                  aria-label="Open SHATVIK CORNER on Instagram"
                 >
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#E1306C]/30 bg-[#E1306C]/20">
                     <Instagram className="h-4 w-4 text-[#E1306C]" aria-hidden="true" />

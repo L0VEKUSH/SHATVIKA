@@ -3,14 +3,14 @@ import Link from 'next/link';
 
 export const metadata: Metadata = {
   title: 'Business policies',
-  description: 'Current SHATVIKA CORNER collection, cancellation, refund, privacy, and tax information.',
+  description: 'Current SHATVIK CORNER collection, cancellation, refund, privacy, and tax information.',
 };
 
 const policies = [
   {
     id: 'delivery',
     title: 'Collection and delivery status',
-    value: `Delivery is currently unavailable. New orders are for counter collection at SHATVIKA CORNER and have no delivery fee.${process.env.BUSINESS_DELIVERY_POLICY?.trim() ? `\n\n${process.env.BUSINESS_DELIVERY_POLICY.trim()}` : ''}`,
+    value: `Delivery is currently unavailable. New orders are for counter collection at SHATVIK CORNER and have no delivery fee.${process.env.BUSINESS_DELIVERY_POLICY?.trim() ? `\n\n${process.env.BUSINESS_DELIVERY_POLICY.trim()}` : ''}`,
     missing: '',
   },
   { id: 'cancellation', title: 'Cancellation and refunds', value: process.env.BUSINESS_CANCELLATION_REFUND_POLICY, missing: 'The owner must confirm cancellation cut-offs, refund eligibility, method, and timing before publishing this policy.' },
@@ -23,7 +23,7 @@ export default function PoliciesPage() {
   return (
     <main id="main-content" className="min-h-screen bg-[#0a0a0a] px-5 py-16 text-white">
       <div className="mx-auto max-w-3xl">
-        <Link href="/" className="text-sm font-semibold text-[#FF8C00] hover:underline">← Back to SHATVIKA CORNER</Link>
+        <Link href="/" className="text-sm font-semibold text-[#FF8C00] hover:underline">← Back to SHATVIK CORNER</Link>
         <h1 className="mt-8 text-4xl font-black">Business policies</h1>
         <p className="mt-3 text-gray-400">Only owner-supplied terms are presented as policy. Missing information is explicitly identified below.</p>
         <div className="mt-10 space-y-6">

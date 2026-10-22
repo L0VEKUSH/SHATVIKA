@@ -43,6 +43,9 @@ export default function WorkersPage() {
   const [locationDrafts, setLocationDrafts] = useState<Record<string, string>>({});
   const [reset, setReset] = useState<{ id: string; password: string } | null>(null);
 
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+
   const load = useCallback(async () => {
     try {
       setError(null);
@@ -52,8 +55,11 @@ export default function WorkersPage() {
         configuredLocationId: string;
         locations: CounterLocation[];
         locationConfiguration: { explicit: boolean; warning: string | null };
-      }>('/api/admin/workers?limit=100', { cache: 'no-store' });
+        pages: number;
+        total: number;
+      }>(`/api/admin/workers?page=${page}&limit=50`, { cache: 'no-store' });
       setWorkers(data.workers ?? []);
+      setTotalPages(data.pages ?? 1);
       setConfiguredLocationId(data.configuredLocationId);
       setLocations(data.locations ?? []);
       setLocationWarning(data.locationConfiguration.warning);
@@ -67,7 +73,7 @@ export default function WorkersPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -145,6 +151,13 @@ export default function WorkersPage() {
                 )}
               </article>
             ))}
+          </div>
+        )}
+        {totalPages > 1 && (
+          <div className="mt-6 flex items-center justify-between border-t border-white/10 pt-4">
+            <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="rounded-lg border border-white/10 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">Previous</button>
+            <span className="text-xs text-gray-400">Page {page} of {totalPages}</span>
+            <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)} className="rounded-lg border border-white/10 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">Next</button>
           </div>
         )}
       </section>

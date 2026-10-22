@@ -123,7 +123,7 @@ export default function WhyChooseUs() {
             Our Promise
           </p>
           <h2 className="text-4xl md:text-5xl font-black text-white mb-4">
-            Why Choose <span className="flame-text">SHATVIKA CORNER?</span>
+            Why Choose <span className="flame-text">SHATVIK CORNER?</span>
           </h2>
           <p className="text-gray-400 max-w-lg mx-auto text-sm md:text-base">
             We don&apos;t just make food — we craft experiences. Here&apos;s what sets us apart.

@@ -1,6 +1,6 @@
-# SHATVIKA CORNER
+# SHATVIK CORNER
 
-SHATVIKA CORNER is a counter-collection ordering and business-operations application. Customers can browse the live menu without signing in, keep a local cart, authenticate only when confirming an order, receive one daily/location-scoped token, pay at the counter, and follow the order through collection. Restricted worker and administrator workspaces manage the queue, verified collections, inventory, costs, analytics, and private downloadable reports.
+SHATVIK CORNER is a counter-collection ordering and business-operations application. Customers can browse the live menu without signing in, keep a local cart, authenticate only when confirming an order, receive one daily/location-scoped token, pay at the counter, and follow the order through collection. Restricted worker and administrator workspaces manage the queue, verified collections, inventory, costs, analytics, and private downloadable reports.
 
 Delivery is not available for new orders. Historical delivery records retain their original meaning.
 
@@ -73,7 +73,7 @@ CSRF_SECRET=
 DELIVERY_ENABLED=false
 BUSINESS_TIME_ZONE=Asia/Kolkata
 COUNTER_LOCATION_ID=shatvika-corner
-COUNTER_LOCATION_NAME=Shatvika Corner
+COUNTER_LOCATION_NAME=Shatvik Corner
 COUNTER_TOKEN_PREFIX=SC
 TAX_RATE_BASIS_POINTS=
 ```

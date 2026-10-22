@@ -142,21 +142,21 @@ export default function Navbar({ onCartOpen, darkMode, onDarkModeToggle }: Navba
             : 'bg-transparent'
         }`}
       >
-        <div className="max-w-7xl mx-auto px-4 md:px-8 flex items-center justify-between h-[72px]">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-8 flex items-center justify-between h-[64px] sm:h-[72px]">
 
           {/* Logo */}
           <a
             href="#home"
             onClick={e => { e.preventDefault(); scrollTo('#home'); }}
-            className="flex items-center gap-2.5 shrink-0"
+            className="flex items-center gap-2 sm:gap-2.5 shrink-0"
           >
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#FF4500] to-[#FFD700]
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-[#FF4500] to-[#FFD700]
                             flex items-center justify-center shadow-lg shadow-[#FF4500]/30
                             group-hover:scale-110 transition-transform">
-              <span className="text-base">🔥</span>
+              <span className="text-sm sm:text-base">🔥</span>
             </div>
-            <span className="text-xl font-black tracking-tight select-none">
-              <span className="flame-text">SHATVIKA</span>
+            <span className="text-base sm:text-xl font-black tracking-tight select-none">
+              <span className="flame-text">SHATVIK</span>
               <span className="text-white">CORNER</span>
             </span>
           </a>
@@ -184,9 +184,9 @@ export default function Navbar({ onCartOpen, darkMode, onDarkModeToggle }: Navba
           </nav>
 
           {/* Right Actions */}
-          <div className="flex items-center gap-2">
-            {/* Expandable search */}
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Desktop expandable search */}
+            <div className="hidden md:flex items-center gap-2">
               <AnimatePresence>
                 {searchOpen && (
                   <motion.div
@@ -197,7 +197,7 @@ export default function Navbar({ onCartOpen, darkMode, onDarkModeToggle }: Navba
                     className="overflow-hidden"
                   >
                     <input
-                      id="menu-search"
+                      id="menu-search-desktop"
                       aria-label="Search the menu"
                       ref={searchRef}
                       type="search"
@@ -213,6 +213,13 @@ export default function Navbar({ onCartOpen, darkMode, onDarkModeToggle }: Navba
                 )}
               </AnimatePresence>
               <IconBtn label="Toggle search" onClick={() => setSearchOpen(v => !v)}>
+                <Search className="w-4 h-4 text-gray-400" />
+              </IconBtn>
+            </div>
+
+            {/* Mobile search toggle */}
+            <div className="md:hidden">
+              <IconBtn label="Search menu" onClick={() => setSearchOpen(v => !v)}>
                 <Search className="w-4 h-4 text-gray-400" />
               </IconBtn>
             </div>
@@ -254,6 +261,44 @@ export default function Navbar({ onCartOpen, darkMode, onDarkModeToggle }: Navba
             </div>
           </div>
         </div>
+
+        {/* Mobile search dropdown bar */}
+        <AnimatePresence>
+          {searchOpen && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="md:hidden border-t border-white/10 bg-[#0a0a0a]/95 backdrop-blur-2xl px-4 py-2.5 overflow-hidden shadow-xl"
+            >
+              <div className="relative flex items-center">
+                <Search className="absolute left-3 w-4 h-4 text-gray-500" />
+                <input
+                  id="menu-search-mobile"
+                  aria-label="Search the menu"
+                  ref={searchRef}
+                  type="search"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  placeholder="Search momos, burgers, fries…"
+                  className="w-full bg-white/10 border border-white/15 rounded-xl
+                             pl-9 pr-9 py-2 text-sm text-white placeholder-gray-400
+                             focus:outline-none focus:border-[#FF4500]"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-3 text-xs text-gray-400 hover:text-white"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.header>
 
       {/* ─── Mobile Menu Overlay ───────────────────────── */}
@@ -279,7 +324,7 @@ export default function Navbar({ onCartOpen, darkMode, onDarkModeToggle }: Navba
                 <span className="text-2xl">🔥</span>
               </div>
               <span className="text-2xl font-black">
-                <span className="flame-text">SHATVIKA</span>
+                <span className="flame-text">SHATVIK</span>
                 <span className="text-white">CORNER</span>
               </span>
             </div>

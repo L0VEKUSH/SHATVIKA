@@ -67,9 +67,9 @@ export async function sendPasswordResetEmail(input: {
     body: JSON.stringify({
       from: input.config.from,
       to: [input.recipient],
-      subject: 'Reset your SHATVIKA CORNER password',
+      subject: 'Reset your Shatvik Corner password',
       text: [
-        'A password reset was requested for your SHATVIKA CORNER account.',
+        'A password reset was requested for your Shatvik Corner account.',
         '',
         `Use this single-use link within 15 minutes: ${resetUrl}`,
         '',

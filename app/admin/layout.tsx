@@ -1,8 +1,8 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'SHATVIKA CORNER Admin',
-  description: 'SHATVIKA CORNER restaurant admin dashboard',
+  title: 'SHATVIK CORNER Admin',
+  description: 'SHATVIK CORNER restaurant admin dashboard',
   robots: { index: false, follow: false },
 };
 

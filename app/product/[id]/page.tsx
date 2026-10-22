@@ -113,7 +113,7 @@ function ProductReviewCard({ review, onToggleHelpful }: { review: ReviewType; on
       ) : null}
       {review.replyText && (
         <div className="mb-3 rounded-xl bg-[#FF4500]/10 border border-[#FF4500]/20 p-3 text-sm text-gray-300">
-          <p className="text-xs font-bold text-[#FF8C00] mb-1">Response from SHATVIKA CORNER</p>
+          <p className="text-xs font-bold text-[#FF8C00] mb-1">Response from SHATVIK CORNER</p>
           {review.replyText}
         </div>
       )}
@@ -286,7 +286,7 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
     setShareStatus('');
     try {
       if (typeof navigator.share === 'function') {
-        await navigator.share({ title: product?.name ?? 'SHATVIKA CORNER menu item', url: window.location.href });
+        await navigator.share({ title: product?.name ?? 'SHATVIK CORNER menu item', url: window.location.href });
         setShareStatus('Shared.');
         return;
       }
@@ -338,7 +338,7 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white pb-20">
+    <div className="min-h-screen bg-[#0a0a0a] text-white pb-32 lg:pb-20">
       {/* Background glows */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none" aria-hidden>
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-[#FF4500]/10 rounded-full blur-[120px]" />
@@ -641,6 +641,41 @@ export default function ProductDetailsPage({ params }: { params: Promise<{ id: s
           </div>
         )}
       </main>
+
+      {/* ── Mobile Sticky Add-to-Cart Bar ─────────────────────── */}
+      <div className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-[#0d0d0d]/95 backdrop-blur-xl border-t border-white/10 px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-4 sm:pt-4 sm:pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-[0_-8px_30px_rgba(0,0,0,0.7)]">
+        <div className="max-w-md mx-auto flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <span className="text-[10px] uppercase text-gray-500 font-semibold block">Total</span>
+            <span className="flame-text text-lg sm:text-xl font-black">₹{totalPrice.toFixed(0)}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleAddToCart}
+              disabled={!canOrder}
+              className={`min-h-11 px-4 sm:px-5 py-2.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 ${
+                added
+                  ? 'bg-green-500/20 border border-green-500/40 text-green-400'
+                  : 'btn-flame disabled:opacity-50'
+              }`}
+            >
+              {added ? (
+                <><CheckCircle className="w-4 h-4" /> Added!</>
+              ) : (
+                <><ShoppingCart className="w-4 h-4" /> Add to Cart</>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => { if (handleAddToCart()) router.push('/?confirmOrder=1'); }}
+              disabled={!canOrder}
+              className="min-h-11 px-4 sm:px-5 py-2.5 rounded-full text-xs font-bold bg-white text-black hover:bg-gray-100 flex items-center gap-1.5 active:scale-95 disabled:opacity-50"
+            >
+              <Zap className="w-4 h-4" /> Buy Now
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -21,5 +21,5 @@ export function isPublicSiteUrlConfigured(): boolean {
 }
 
 export function getSiteName(): string {
-  return process.env.NEXT_PUBLIC_SITE_NAME?.trim() || 'SHATVIKA CORNER';
+  return process.env.NEXT_PUBLIC_SITE_NAME?.trim() || 'Shatvik Corner';
 }

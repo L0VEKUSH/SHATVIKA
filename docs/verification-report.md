@@ -1,4 +1,4 @@
-# SHATVIKA CORNER repair and verification report
+# SHATVIK CORNER repair and verification report
 
 Date: 2026-09-20; follow-ups verified 2026-09-26 and 2026-09-27 (Asia/Kolkata)
 Workspace: `C:\Users\ASUS\Downloads\SHATVIKA CORNER`

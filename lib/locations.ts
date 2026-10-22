@@ -23,7 +23,7 @@ export function getCounterLocationConfiguration(
   const configuredValue = source.COUNTER_LOCATION_ID?.trim();
   const explicit = Boolean(configuredValue);
   const id = canonicalLocationId(configuredValue || 'shatvika-corner');
-  const name = source.COUNTER_LOCATION_NAME?.trim().slice(0, 120) || 'Shatvika Corner';
+  const name = source.COUNTER_LOCATION_NAME?.trim().slice(0, 120) || 'Shatvik Corner';
   return {
     location: { id, name } satisfies CounterLocation,
     explicit,

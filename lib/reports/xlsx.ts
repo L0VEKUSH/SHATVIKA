@@ -34,7 +34,7 @@ function styleHeader(row: ExcelJS.Row) {
 
 export async function generateXlsx(report: BusinessReport) {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'SHATVIKA CORNER';
+  workbook.creator = 'SHATVIK CORNER';
   workbook.created = new Date(report.generatedAt);
   workbook.modified = new Date(report.generatedAt);
   workbook.properties.date1904 = false;

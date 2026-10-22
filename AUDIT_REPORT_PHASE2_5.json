@@ -1,6 +1,6 @@
 {
   "audit_date": "2024",
-  "project": "Shatvika Corner - Restaurant Ordering Platform",
+  "project": "Shatvik Corner - Restaurant Ordering Platform",
   "phase_2_react_issues": [
     {
       "file": "context/AdminContext.tsx",

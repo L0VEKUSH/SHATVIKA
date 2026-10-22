@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, UtensilsCrossed, ShoppingBag,
-  Tag, Menu, X, ChevronRight, FileText, Image, Star, LogOut, MessageSquare, CircleDollarSign, UsersRound,
+  Tag, Menu, X, ChevronRight, FileText, Image, Star, LogOut, MessageSquare, CircleDollarSign, UsersRound, ShieldCheck,
 } from 'lucide-react';
 import { apiRequest, clearApiClientSession } from '@/lib/apiClient';
 
@@ -19,6 +19,7 @@ const NAV = [
   { href: '/admin/contacts', icon: MessageSquare,    label: 'Contacts'    },
   { href: '/admin/orders',  icon: ShoppingBag,       label: 'Orders'      },
   { href: '/admin/finance', icon: CircleDollarSign,  label: 'Costs & stock' },
+  { href: '/admin/admins', icon: ShieldCheck, label: 'Admin accounts' },
   { href: '/admin/workers', icon: UsersRound,        label: 'Counter workers' },
   { href: '/admin/coupons', icon: Tag,               label: 'Coupons'     },
 ];
@@ -123,7 +124,7 @@ export default function AdminSidebar() {
         {!collapsed && (
           <div>
             <p className="text-sm font-black text-white leading-none">
-              <span className="flame-text">SHATVIKA</span> CORNER
+              <span className="flame-text">SHATVIK</span> CORNER
             </p>
             <p className="text-[10px] text-gray-600 font-medium uppercase tracking-wider mt-0.5">Admin Panel</p>
           </div>
@@ -215,7 +216,7 @@ export default function AdminSidebar() {
               animate={{ x: 0 }}
               exit={{ x: '-100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 220 }}
-              className="fixed top-0 left-0 h-full w-64 bg-[#0f0f0f] border-r border-white/8 z-50 lg:hidden"
+              className="fixed top-0 left-0 h-screen supports-[height:100dvh]:h-dvh w-64 bg-[#0f0f0f] border-r border-white/8 z-50 lg:hidden"
             >
               <button
                 type="button"

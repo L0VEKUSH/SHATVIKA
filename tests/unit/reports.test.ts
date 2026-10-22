@@ -190,7 +190,7 @@ describe('XLSX report generation', () => {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]);
 
-    expect(workbook.creator).toBe('SHATVIKA CORNER');
+    expect(workbook.creator).toBe('SHATVIK CORNER');
     expect(workbook.created?.toISOString()).toBe(report.generatedAt);
     expect(workbook.modified?.toISOString()).toBe(report.generatedAt);
     expect(workbook.worksheets.map(worksheet => worksheet.name)).toEqual([

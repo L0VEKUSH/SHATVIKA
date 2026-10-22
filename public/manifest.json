@@ -1,7 +1,7 @@
 {
-  "name": "SHATVIKA CORNER",
-  "short_name": "Shatvika",
-  "description": "Menu, ordering, and account services from SHATVIKA CORNER.",
+  "name": "SHATVIK CORNER",
+  "short_name": "Shatvik",
+  "description": "Menu, ordering, and account services from SHATVIK CORNER.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",

@@ -38,7 +38,7 @@ export const env = {
   NEXT_PUBLIC_APP_URL: optional('NEXT_PUBLIC_APP_URL', 'http://localhost:3000'),
 
   /** Branding */
-  NEXT_PUBLIC_SITE_NAME: optional('NEXT_PUBLIC_SITE_NAME', 'Shatvika Corner'),
+  NEXT_PUBLIC_SITE_NAME: optional('NEXT_PUBLIC_SITE_NAME', 'Shatvik Corner'),
 
   NODE_ENV: optional('NODE_ENV', 'development'),
 } as const;

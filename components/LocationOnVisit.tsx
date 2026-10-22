@@ -16,7 +16,7 @@ export default function LocationOnVisit() {
     <div
       role="status"
       aria-live="polite"
-      className="fixed bottom-4 left-4 right-4 z-40 rounded-2xl border border-white/10 bg-[#111]/95 p-4 shadow-2xl backdrop-blur-xl sm:right-auto sm:max-w-sm"
+      className="relative z-10 mx-4 my-4 rounded-2xl border border-white/10 bg-[#111]/95 p-4 shadow-2xl backdrop-blur-xl md:fixed md:bottom-4 md:left-4 md:right-auto md:z-40 md:mx-0 md:my-0 md:w-full md:max-w-sm"
     >
       <div className="flex items-start gap-3">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#FF4500]/15">
@@ -32,7 +32,7 @@ export default function LocationOnVisit() {
           type="button"
           onClick={() => setDismissed(true)}
           aria-label="Dismiss collection notice"
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/5 hover:bg-white/10"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-white/5 hover:bg-white/10"
         >
           <X className="h-4 w-4 text-gray-400" aria-hidden="true" />
         </button>

@@ -1,5 +1,5 @@
 # 📑 AUDIT DOCUMENTATION INDEX
-## Complete Production Readiness Audit - Shatvika Corner
+## Complete Production Readiness Audit - Shatvik Corner
 
 ---
 

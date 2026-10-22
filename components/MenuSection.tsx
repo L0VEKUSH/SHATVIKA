@@ -146,17 +146,17 @@ function FoodCard({ item }: { item: MenuItem }) {
           </div>
         )}
 
-        <div className="flex items-center justify-between mt-auto pt-2 border-t border-white/5">
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold text-white truncate">{item.name}</p>
-            <p className="flame-text text-sm font-black mt-0.5">₹{price.toFixed(2)}</p>
+        <div className="flex items-center justify-between mt-auto pt-2.5 border-t border-white/5 gap-2">
+          <div className="min-w-0">
+            <span className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold block">Price</span>
+            <p className="flame-text text-base sm:text-lg font-black leading-tight">₹{price.toFixed(2)}</p>
           </div>
 
           <button
             onClick={handleAdd}
             disabled={!canAdd}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold
-                        transition-all duration-200 ${
+            className={`min-h-9 flex items-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-full text-xs font-bold shrink-0
+                        transition-all duration-200 active:scale-95 ${
                           added
                             ? 'bg-green-500/20 border border-green-500/40 text-green-400'
                             : 'btn-flame disabled:cursor-not-allowed disabled:opacity-50'
@@ -166,7 +166,7 @@ function FoodCard({ item }: { item: MenuItem }) {
               <>✓ Added</>
             ) : (
               <>
-                {canAdd && <Plus className="w-3 h-3" />}
+                {canAdd && <Plus className="w-3.5 h-3.5" />}
                 {canAdd ? 'Add' : availabilityLabel ?? 'Unavailable'}
               </>
             )}
@@ -267,7 +267,7 @@ export default function MenuSection() {
 
         {/* ── Category tabs ─── */}
         <motion.div
-          className="flex items-center gap-2 overflow-x-auto pb-2 mb-8 scrollbar-hide justify-start md:justify-center"
+          className="flex items-center gap-2 overflow-x-auto pb-3 mb-8 scrollbar-hide justify-start md:justify-center -mx-4 px-4 sm:mx-0 sm:px-0"
           initial={{ opacity: 0, y: 16 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
@@ -277,7 +277,7 @@ export default function MenuSection() {
             <button
               key={cat}
               onClick={() => setActiveCategory(cat)}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-semibold
+              className={`flex items-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-full text-xs sm:text-sm font-semibold
                           whitespace-nowrap border transition-all duration-200 shrink-0 ${
                             activeCategory === cat
                               ? 'bg-gradient-to-r from-[#FF4500] to-[#FF8C00] text-white border-transparent shadow-lg shadow-[#FF4500]/25'
@@ -295,7 +295,7 @@ export default function MenuSection() {
           {filtered.length > 0 ? (
             <motion.div
               key={activeCategory + searchQuery}
-              className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4"
+              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}

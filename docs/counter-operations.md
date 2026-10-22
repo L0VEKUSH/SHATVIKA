@@ -1,6 +1,6 @@
 # Counter ordering and operations runbook
 
-SHATVIKA CORNER currently accepts counter-collection orders only. The supported customer journey is:
+SHATVIK CORNER currently accepts counter-collection orders only. The supported customer journey is:
 
 `Browse menu -> Add to cart -> Confirm order & get token -> Pay at counter -> Collect items`
 
@@ -15,7 +15,7 @@ DELIVERY_ENABLED=false
 BUSINESS_TIME_ZONE=Asia/Kolkata
 NEXT_PUBLIC_BUSINESS_TIME_ZONE=Asia/Kolkata
 COUNTER_LOCATION_ID=shatvika-corner
-COUNTER_LOCATION_NAME=Shatvika Corner
+COUNTER_LOCATION_NAME=Shatvik Corner
 COUNTER_TOKEN_PREFIX=SC
 WORKER_JWT_SECRET=
 TAX_RATE_BASIS_POINTS=

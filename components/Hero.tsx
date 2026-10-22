@@ -137,7 +137,7 @@ export default function Hero({ onOrderNow }: HeroProps) {
         {/* Main headline */}
         <div className="overflow-hidden mb-4">
           <motion.h1
-            className="text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-black leading-none
+            className="text-4xl xs:text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-black leading-[1.08] sm:leading-none
                        tracking-tight uppercase"
             initial={{ y: 80 }}
             animate={{ y: 0 }}
@@ -173,26 +173,26 @@ export default function Hero({ onOrderNow }: HeroProps) {
 
         {/* Sub-headline */}
         <motion.p
-          className="text-base sm:text-lg md:text-xl text-gray-400 max-w-xl mx-auto mb-10 leading-relaxed font-light"
+          className="text-sm sm:text-base md:text-xl text-gray-400 max-w-xl mx-auto mb-8 sm:mb-10 leading-relaxed font-light px-2"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.65, duration: 0.6 }}
         >
           See the current catalogue, prices, and availability.{' '}
-          <span className="text-white font-medium">Confirm once for a counter token, then pay and collect at SHATVIKA CORNER.</span>
+          <span className="text-white font-medium">Confirm once for a counter token, then pay and collect at SHATVIK CORNER.</span>
         </motion.p>
 
         {/* CTA Buttons */}
         <motion.div
-          className="flex flex-col sm:flex-row items-center justify-center gap-4"
+          className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4 w-full max-w-xs sm:max-w-none mx-auto"
           initial={{ opacity: 0, y: 24 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.8, duration: 0.6 }}
         >
           <button
             onClick={onOrderNow}
-            className="btn-flame px-8 py-4 text-base font-bold flex items-center gap-2.5
-                       group w-full sm:w-auto justify-center"
+            className="btn-flame px-6 py-3.5 sm:px-8 sm:py-4 text-sm sm:text-base font-bold flex items-center gap-2.5
+                       group w-full sm:w-auto justify-center shadow-lg shadow-[#FF4500]/25"
           >
             <span>Order Now</span>
             <ArrowRight
@@ -206,7 +206,7 @@ export default function Hero({ onOrderNow }: HeroProps) {
               e.preventDefault();
               document.querySelector('#menu')?.scrollIntoView({ behavior: 'smooth' });
             }}
-            className="btn-outline px-8 py-4 text-base font-semibold
+            className="btn-outline px-6 py-3.5 sm:px-8 sm:py-4 text-sm sm:text-base font-semibold
                        flex items-center gap-2 w-full sm:w-auto justify-center"
           >
             Explore Menu

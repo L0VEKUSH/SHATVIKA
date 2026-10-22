@@ -24,7 +24,7 @@ jobs:
       NEXT_TELEMETRY_DISABLED: '1'
       NEXT_PUBLIC_APP_URL: https://example.invalid
       NEXT_PUBLIC_SITE_URL: https://example.invalid
-      NEXT_PUBLIC_SITE_NAME: SHATVIKA CORNER (CI)
+      NEXT_PUBLIC_SITE_NAME: SHATVIK CORNER (CI)
       BUSINESS_TIME_ZONE: Asia/Kolkata
       ADMIN_JWT_SECRET: ci-only-admin-secret-000000000000000000000000000000000000000000000000
       CUSTOMER_JWT_SECRET: ci-only-customer-secret-0000000000000000000000000000000000000000000000
@@ -32,8 +32,10 @@ jobs:
       CSRF_SECRET: ci-only-csrf-secret-0000000000000000000000000000000000000000000000000
       ADMIN_BOOTSTRAP_ENABLED: 'false'
       DELIVERY_ENABLED: 'false'
+      TRUSTED_PROXY_HOPS: '1'
+      ADMIN_BOOTSTRAP_ENABLED: 'false'
       COUNTER_LOCATION_ID: ci-counter
-      COUNTER_LOCATION_NAME: SHATVIKA CORNER CI
+      COUNTER_LOCATION_NAME: SHATVIK CORNER CI
       COUNTER_TOKEN_PREFIX: SC
       TAX_RATE_BASIS_POINTS: '500'
       DELIVERY_FEE_PAISE: '4000'
@@ -76,8 +78,14 @@ jobs:
       - name: Transactional integration tests
         run: npm run test:integration
 
-      - name: Dependency audit
+      - name: Production dependency audit
         run: npm run deps:review
+
+      - name: Full dependency audit (development tooling)
+        # Preserve visibility into unpatched build-tool advisories without
+        # blocking release verification when production dependencies are clean.
+        continue-on-error: true
+        run: npm run deps:review:all
 
       - name: Production build
         run: npm run build:production

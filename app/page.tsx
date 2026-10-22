@@ -61,6 +61,8 @@ export default function Home() {
           <Hero onOrderNow={() => handleCartOpen('cart')} />
         </section>
 
+        <LocationOnVisit />
+
         <section id="menu" aria-label="Menu">
           <MenuSection />
         </section>
@@ -90,8 +92,6 @@ export default function Home() {
         <Footer />
 
         <Cart isOpen={cartOpen} onClose={() => setCartOpen(false)} initialTab={cartTab} />
-
-        <LocationOnVisit />
       </main>
     </ErrorBoundary>
   );

@@ -340,7 +340,7 @@ function normalizeOrder(
     tokenNumber: text(raw.tokenNumber),
     tokenBusinessDate: text(raw.tokenBusinessDate),
     fulfillmentType: raw.fulfillmentType === 'counter' ? 'counter' : 'delivery',
-    fulfillmentLocation: text(raw.fulfillmentLocationName, raw.fulfillmentType === 'counter' ? 'Shatvika Corner' : 'Legacy delivery'),
+    fulfillmentLocation: text(raw.fulfillmentLocationName, raw.fulfillmentType === 'counter' ? 'Shatvik Corner' : 'Legacy delivery'),
     userId,
     guestSessionId,
     customerIdentityType,

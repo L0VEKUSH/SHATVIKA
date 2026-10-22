@@ -260,8 +260,8 @@ function OrderDetails({ order }: { order: CustomerOrder }) {
             </h3>
             {order.fulfillmentType === 'counter' ? (
               <div className="mt-2 text-sm leading-6 text-gray-300">
-                <p className="font-semibold text-white">{order.fulfillmentLocationName || 'Shatvika Corner'}</p>
-                <p>Delivery currently unavailable — collect at Shatvika Corner.</p>
+                <p className="font-semibold text-white">{order.fulfillmentLocationName || 'Shatvik Corner'}</p>
+                <p>Delivery currently unavailable — collect at Shatvik Corner.</p>
                 <p className="mt-2 text-amber-200">Show token {order.tokenNumber || order.orderNumber}, pay at the counter, and collect after it is marked ready.</p>
                 {order.estimatedReadyTime && <p className="mt-1 text-xs text-gray-500">Initial preparation target: {formatDateTime(order.estimatedReadyTime)} (not a guarantee)</p>}
               </div>

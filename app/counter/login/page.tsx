@@ -42,7 +42,7 @@ export default function CounterLoginPage() {
   return (
     <main id="main-content" className="min-h-screen bg-[#0a0a0a] text-white grid place-items-center p-5">
       <section className="w-full max-w-md rounded-3xl border border-orange-500/20 bg-[#151515] p-6 sm:p-8 shadow-2xl">
-        <p className="text-xs font-bold uppercase tracking-[0.22em] text-orange-400">Shatvika Corner</p>
+        <p className="text-xs font-bold uppercase tracking-[0.22em] text-orange-400">Shatvik Corner</p>
         <h1 className="mt-2 text-3xl font-black">Counter workspace</h1>
         <p className="mt-2 text-sm text-gray-400">Restricted access for authorized counter workers.</p>
         {error && <div role="alert" className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{error}</div>}

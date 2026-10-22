@@ -9,6 +9,8 @@ const complete = {
   CUSTOMER_JWT_SECRET: 'customer-session-secret-that-is-at-least-32-bytes',
   WORKER_JWT_SECRET: 'worker-session-secret-that-is-at-least-thirty-two-bytes',
   CSRF_SECRET: 'csrf-signing-secret-that-is-at-least-32-bytes',
+  TRUSTED_PROXY_HOPS: '1',
+  ADMIN_BOOTSTRAP_ENABLED: 'false',
   TAX_RATE_BASIS_POINTS: '500',
   DELIVERY_ENABLED: 'false',
   COUNTER_LOCATION_ID: 'test-counter',
@@ -28,6 +30,8 @@ describe('runtime configuration health', () => {
       canonicalOrigin: true,
       sessionSecurity: true,
       checkoutRules: true,
+      clientIpRateLimiting: true,
+      adminBootstrapDisabled: true,
     });
     expect(result.integrations).toEqual({
       passwordResetEmail: 'disabled',
@@ -66,6 +70,22 @@ describe('runtime configuration health', () => {
       ...complete,
       DELIVERY_ENABLED: 'true',
     }).required.checkoutRules).toBe(false);
+  });
+
+  it('requires safe production proxy rate limiting and disabled admin bootstrap', () => {
+    const missingProxy = assessRuntimeConfiguration({
+      ...complete,
+      TRUSTED_PROXY_HOPS: '0',
+    });
+    expect(missingProxy.ready).toBe(false);
+    expect(missingProxy.required.clientIpRateLimiting).toBe(false);
+
+    const bootstrapEnabled = assessRuntimeConfiguration({
+      ...complete,
+      ADMIN_BOOTSTRAP_ENABLED: 'true',
+    });
+    expect(bootstrapEnabled.ready).toBe(false);
+    expect(bootstrapEnabled.required.adminBootstrapDisabled).toBe(false);
   });
 
   it('reports partially configured optional integrations without exposing their values', () => {

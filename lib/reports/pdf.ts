@@ -127,7 +127,7 @@ export async function generatePdf(report: BusinessReport) {
       note: { fontSize: 7, color: '#555555', margin: [0, 1, 0, 2] },
     },
     footer: (currentPage: number, pageCount: number) => ({
-      text: `SHATVIKA CORNER • Page ${currentPage} of ${pageCount}`,
+      text: `SHATVIK CORNER • Page ${currentPage} of ${pageCount}`,
       alignment: 'center', fontSize: 7, color: '#777777', margin: [0, 8, 0, 0],
     }),
   } as TDocumentDefinitions;
